@@ -48,10 +48,20 @@ export default async function handler(
       return res.redirect(`${frontendUrl}?auth=error&reason=supabase_not_configured`);
     }
 
-    // Obter URL base para redirect_uri
-    const baseUrl = process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}`
-      : process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3000';
+    // Obter URL base para redirect_uri usando o host da requisição atual
+    let baseUrl: string;
+    
+    if (req.headers.host) {
+      // Usar o host da requisição atual (funciona em preview e produção)
+      const protocol = req.headers['x-forwarded-proto'] || 'https';
+      baseUrl = `${protocol}://${req.headers.host}`;
+    } else if (process.env.VERCEL_URL) {
+      // Fallback para VERCEL_URL se host não estiver disponível
+      baseUrl = `https://${process.env.VERCEL_URL}`;
+    } else {
+      // Fallback para desenvolvimento local
+      baseUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3000';
+    }
     
     const redirectUri = `${baseUrl}/api/auth/callback`;
     
