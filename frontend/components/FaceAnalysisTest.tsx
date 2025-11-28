@@ -48,7 +48,7 @@ export const FaceAnalysisTest: React.FC = () => {
       }
 
       const response = await photosApi.getPhotos(filters);
-      const photosData = response.data || [];
+      const photosData = response.photos || [];
       
       setPhotos(photosData);
       calculateStats(photosData);
