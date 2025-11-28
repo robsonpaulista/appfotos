@@ -182,22 +182,24 @@ export function FaceClusteringPanel() {
 
                 {/* Miniaturas das fotos */}
                 <div className="flex flex-wrap gap-2 mt-3">
-                  {cluster.faces.slice(0, 6).map((face) => (
-                    face.photo && (
+                  {cluster.faces.slice(0, 6).map((face) => {
+                    if (!face.photo) return null;
+                    const photo = face.photo;
+                    return (
                       <div
                         key={face.id}
                         className="relative group"
-                        title={face.photo.name}
+                        title={photo.name}
                       >
                         <img
-                          src={face.photo.thumbnail_url || `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/photos/${face.photo.id}/image`}
-                          alt={face.photo.name}
+                          src={photo.thumbnail_url || `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/photos/${photo.id}/image`}
+                          alt={photo.name}
                           className="w-16 h-16 rounded-lg object-cover border-2 border-white shadow-md hover:scale-110 transition-transform cursor-pointer"
-                          onClick={() => window.open(`/photo/${face.photo.id}`, '_blank')}
+                          onClick={() => window.open(`/photo/${photo.id}`, '_blank')}
                         />
                       </div>
-                    )
-                  ))}
+                    );
+                  })}
                   {cluster.count > 6 && (
                     <div className="w-16 h-16 rounded-lg bg-purple-200 flex items-center justify-center text-purple-700 font-bold text-sm border-2 border-white shadow-md">
                       +{cluster.count - 6}
