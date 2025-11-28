@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '@/utils/api';
+import type { Photo } from '@/types/photo';
 
 interface Face {
   id: string;
@@ -120,7 +121,7 @@ export function FaceRecognitionPanel({ photoId, imageUrl, onUpdate }: FaceRecogn
 
       const newlyAssigned = result?.autoAssignment?.newlyAssigned ?? 0;
       const totalTagsUpdated = result?.totalPhotoTagsUpdated ?? 0;
-      const assignedPhotos = Array.isArray(result?.autoAssignment?.assignedPhotos)
+      const assignedPhotos: Photo[] = Array.isArray(result?.autoAssignment?.assignedPhotos)
         ? result.autoAssignment.assignedPhotos
         : [];
       const messageLines = [
@@ -139,7 +140,7 @@ export function FaceRecognitionPanel({ photoId, imageUrl, onUpdate }: FaceRecogn
 
       if (assignedPhotos.length > 0) {
         messageLines.push('', 'Fotos atualizadas:');
-        assignedPhotos.slice(0, 5).forEach((photo) => {
+        assignedPhotos.slice(0, 5).forEach((photo: Photo) => {
           const date = photo.created_at ? new Date(photo.created_at) : null;
           const formattedDate = date ? date.toLocaleDateString('pt-BR') : '';
           messageLines.push(
