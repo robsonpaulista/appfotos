@@ -165,7 +165,7 @@ export const photosApi = {
     if (updates.event_city !== undefined) mappedUpdates.event_city = updates.event_city;
     if (updates.event_year !== undefined) mappedUpdates.event_year = updates.event_year;
     if (updates.event_month !== undefined) mappedUpdates.event_month = updates.event_month;
-    if (updates.role_tag !== undefined) mappedUpdates.role_tag = updates.role_tag;
+    if ((updates as any).role_tag !== undefined) mappedUpdates.role_tag = (updates as any).role_tag;
     if ((updates as any).role !== undefined) mappedUpdates.role_tag = (updates as any).role;
     if ((updates as any).cargo !== undefined) mappedUpdates.role_tag = (updates as any).cargo;
     
