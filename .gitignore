@@ -1,0 +1,65 @@
+# Dependências
+node_modules/
+package-lock.json
+
+# Variáveis de ambiente
+.env
+.env.local
+*.pem
+
+# Build
+.next/
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Cache
+.cache/
+backend/.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Vercel
+.vercel
+
+# Temporários
+*.tmp
+*.temp
+
+# IGNORAR TUDO FORA DO JARCHIVE
+# Este repositório é APENAS para o PhotoFinder (JArchive)
+# Ignorar tudo que está em diretórios acima ou irmãos
+../*
+../../*
+../../../*
+../../../../*
+../../../../../*
+
+# Mas permitir arquivos do JArchive
+!frontend/
+!backend/
+!database/
+!*.md
+!*.json
+!*.js
+!*.ts
+!*.tsx
+!*.sql
+!*.ps1
+!LICENSE
+!.gitignore
+!vercel.json

@@ -1,0 +1,15 @@
+{
+  "name": "photofinder",
+  "version": "1.0.0",
+  "description": "Organizador Inteligente de Fotos com IA + Google Drive",
+  "scripts": {
+    "dev:backend": "cd backend && nodemon index.js",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && node index.js"
+  },
+  "keywords": ["photos", "google-drive", "ai", "vision-api"],
+  "author": "",
+  "license": "ISC"
+}

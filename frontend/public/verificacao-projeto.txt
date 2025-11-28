@@ -1,0 +1,7 @@
+PROJETO: PhotoFinder
+DESCRICAO: Organizador Inteligente de Fotos com IA + Google Drive
+REPOSITORIO: robsonpaulista/appfotosjadyel
+DATA: 2025-01-XX
+
+Este arquivo confirma que este é o projeto PhotoFinder, NÃO o aerocost.
+
