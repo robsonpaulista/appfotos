@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { FaTimes, FaMapMarkerAlt, FaCalendar, FaCamera, FaUser, FaEdit, FaSave } from 'react-icons/fa';
+import { FaTimes, FaMapMarkerAlt, FaCalendar, FaUser, FaEdit, FaSave } from 'react-icons/fa';
 import type { Photo } from '@/types/photo';
 import { photosApi } from '@/utils/api';
 import { formatDate, formatDateTime, formatFacesCount, formatCoordinates } from '@/utils/formatters';
@@ -178,18 +178,6 @@ export default function PhotoModal({ photo, onClose }: PhotoModalProps) {
               </p>
               <p className="text-gray-900">{formatDateTime(photo.created_at)}</p>
             </div>
-
-            {photo.camera_make && (
-              <div>
-                <p className="text-sm text-gray-500 flex items-center">
-                  <FaCamera className="mr-2" />
-                  Câmera
-                </p>
-                <p className="text-gray-900">
-                  {photo.camera_make} {photo.camera_model}
-                </p>
-              </div>
-            )}
 
             {photo.width && photo.height && (
               <div>
