@@ -220,14 +220,6 @@ export default function PhotoModal({ photo, onClose }: PhotoModalProps) {
                 </div>
               )}
 
-              {photo.detection_confidence && (
-                <div>
-                  <p className="text-sm text-gray-500">Confiança</p>
-                  <p className="text-gray-900">
-                    {Math.round(photo.detection_confidence * 100)}%
-                  </p>
-                </div>
-              )}
             </div>
           )}
         </div>
