@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { FaTimes, FaMapMarkerAlt, FaCalendar, FaCamera, FaUser, FaEdit, FaSave } from 'react-icons/fa';
 import type { Photo } from '@/types/photo';
 import { photosApi } from '@/utils/api';
-import { formatDate, formatDateTime, formatExpression, formatFacesCount, formatCoordinates } from '@/utils/formatters';
+import { formatDate, formatDateTime, formatFacesCount, formatCoordinates } from '@/utils/formatters';
 
 interface PhotoModalProps {
   photo: Photo;
@@ -44,7 +44,24 @@ export default function PhotoModal({ photo, onClose }: PhotoModalProps) {
     }
   };
 
-  const expression = formatExpression(photo.expression);
+  // Determinar expressão principal baseada nas likelihoods
+  const getMainExpression = () => {
+    if (photo.joy_likelihood === 'VERY_LIKELY' || photo.joy_likelihood === 'LIKELY') {
+      return { emoji: '😊', text: 'Feliz' };
+    }
+    if (photo.sorrow_likelihood === 'VERY_LIKELY' || photo.sorrow_likelihood === 'LIKELY') {
+      return { emoji: '😢', text: 'Triste' };
+    }
+    if (photo.anger_likelihood === 'VERY_LIKELY' || photo.anger_likelihood === 'LIKELY') {
+      return { emoji: '😠', text: 'Bravo' };
+    }
+    if (photo.surprise_likelihood === 'VERY_LIKELY' || photo.surprise_likelihood === 'LIKELY') {
+      return { emoji: '😮', text: 'Surpreso' };
+    }
+    return { emoji: '😐', text: 'Neutro' };
+  };
+  
+  const expression = getMainExpression();
 
   return (
     <div
@@ -203,7 +220,10 @@ export default function PhotoModal({ photo, onClose }: PhotoModalProps) {
                 <p className="text-gray-900">{formatFacesCount(photo.faces_detected)}</p>
               </div>
 
-              {photo.expression && photo.expression !== 'unknown' && (
+              {(photo.joy_likelihood === 'VERY_LIKELY' || photo.joy_likelihood === 'LIKELY' ||
+                photo.sorrow_likelihood === 'VERY_LIKELY' || photo.sorrow_likelihood === 'LIKELY' ||
+                photo.anger_likelihood === 'VERY_LIKELY' || photo.anger_likelihood === 'LIKELY' ||
+                photo.surprise_likelihood === 'VERY_LIKELY' || photo.surprise_likelihood === 'LIKELY') && (
                 <div>
                   <p className="text-sm text-gray-500">Expressão</p>
                   <p className="text-gray-900">
