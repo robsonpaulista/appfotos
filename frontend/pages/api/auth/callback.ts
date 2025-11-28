@@ -113,10 +113,10 @@ export default async function handler(
       .from('users')
       .select('id')
       .eq('google_id', userInfo.id)
-      .single();
+      .maybeSingle(); // Usar maybeSingle para não dar erro se não encontrar
     
     let user;
-    if (existingUser) {
+    if (existingUser && !selectError) {
       // Atualizar usuário existente
       const { data: updatedUser, error: updateError } = await supabase
         .from('users')
