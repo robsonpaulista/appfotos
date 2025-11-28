@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Image from 'next/image';
 import { FaMapMarkerAlt, FaSmile, FaUser, FaCalendar } from 'react-icons/fa';
 import type { Photo } from '@/types/photo';
-import { formatDate, formatExpression } from '@/utils/formatters';
+import { formatDate } from '@/utils/formatters';
 import { photosApi } from '@/utils/api';
 import PhotoModal from './PhotoModal';
 
@@ -51,7 +51,7 @@ export default function PhotoGrid({ photos, loading = false }: PhotoGridProps) {
           >
             <div className="aspect-square relative">
               <Image
-                src={photosApi.getThumbnailUrl(photo.id)}
+                src={photo.thumbnail_url || photosApi.getImageUrl(photo.id)}
                 alt={photo.name}
                 fill
                 className="object-cover"
@@ -73,9 +73,9 @@ export default function PhotoGrid({ photos, loading = false }: PhotoGridProps) {
                       </span>
                     )}
                     
-                    {photo.expression && photo.expression !== 'unknown' && (
+                    {(photo.joy_likelihood === 'VERY_LIKELY' || photo.joy_likelihood === 'LIKELY') && (
                       <span className="flex items-center bg-black/50 px-2 py-1 rounded">
-                        {formatExpression(photo.expression).emoji}
+                        😊
                       </span>
                     )}
                     
