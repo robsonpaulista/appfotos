@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { FaSearch, FaSmile, FaMapMarkerAlt, FaCalendar, FaUser } from 'react-icons/fa';
-import { photosApi } from '@/utils/api';
+import { photosApi, api } from '@/utils/api';
 import type { PhotoFilters } from '@/types/photo';
 
 interface FilterBarProps {
@@ -12,10 +12,10 @@ interface FilterBarProps {
 export default function FilterBar({ onFilterChange }: FilterBarProps) {
   const [people, setPeople] = useState<string[]>([]);
   const [locations, setLocations] = useState<string[]>([]);
+  const [year, setYear] = useState<number | undefined>(undefined);
   const [filters, setFilters] = useState<PhotoFilters>({
     person: undefined,
     joy: undefined,
-    year: undefined,
     city: undefined,
     minFaces: undefined,
   });
@@ -27,11 +27,11 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
   const loadFilterOptions = async () => {
     try {
       const [peopleData, locationsData] = await Promise.all([
-        photosApi.listPeople(),
-        photosApi.listLocations(),
+        api.getTags(),
+        api.getCities(),
       ]);
-      setPeople(peopleData);
-      setLocations(locationsData);
+      setPeople(peopleData || []);
+      setLocations(locationsData || []);
     } catch (error) {
       console.error('Erro ao carregar opções de filtro:', error);
     }
@@ -43,13 +43,28 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
     onFilterChange(newFilters);
   };
 
+  const handleYearChange = (yearValue: number | undefined) => {
+    setYear(yearValue);
+    const newFilters = { ...filters };
+    if (yearValue) {
+      newFilters.dateFrom = `${yearValue}-01-01`;
+      newFilters.dateTo = `${yearValue}-12-31`;
+    } else {
+      delete newFilters.dateFrom;
+      delete newFilters.dateTo;
+    }
+    setFilters(newFilters);
+    onFilterChange(newFilters);
+  };
+
   const clearFilters = () => {
+    setYear(undefined);
     const emptyFilters: PhotoFilters = {};
     setFilters(emptyFilters);
     onFilterChange(emptyFilters);
   };
 
-  const hasActiveFilters = Object.values(filters).some(v => v !== undefined);
+  const hasActiveFilters = Object.values(filters).some(v => v !== undefined) || year !== undefined;
 
   return (
     <div className="bg-white shadow-sm rounded-lg p-6 mb-6">
@@ -135,8 +150,8 @@ export default function FilterBar({ onFilterChange }: FilterBarProps) {
           </label>
           <input
             type="number"
-            value={filters.year || ''}
-            onChange={(e) => handleFilterChange('year', e.target.value ? parseInt(e.target.value) : undefined)}
+            value={year || ''}
+            onChange={(e) => handleYearChange(e.target.value ? parseInt(e.target.value) : undefined)}
             placeholder="Ex: 2024"
             min="2000"
             max={new Date().getFullYear()}
