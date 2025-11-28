@@ -123,7 +123,7 @@ export const FaceAnalysisTest: React.FC = () => {
     return 'Neutro';
   };
 
-  const getLikelihoodColor = (likelihood?: string): string => {
+  const getLikelihoodColor = (likelihood: string | null | undefined): string => {
     switch (likelihood) {
       case 'VERY_LIKELY': return 'bg-green-500';
       case 'LIKELY': return 'bg-green-400';
@@ -134,7 +134,7 @@ export const FaceAnalysisTest: React.FC = () => {
     }
   };
 
-  const getLikelihoodText = (likelihood?: string): string => {
+  const getLikelihoodText = (likelihood: string | null | undefined): string => {
     switch (likelihood) {
       case 'VERY_LIKELY': return 'Muito Provável';
       case 'LIKELY': return 'Provável';
