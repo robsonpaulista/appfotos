@@ -26,11 +26,29 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
   },
   global: {
     fetch: (url, options = {}) => {
-      const headers = {
-        ...options.headers,
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-      };
+      // Garantir que os headers sejam um objeto Headers ou objeto simples
+      const existingHeaders = options.headers || {};
+      const headers = new Headers(existingHeaders instanceof Headers ? existingHeaders : existingHeaders);
+      
+      // Garantir headers obrigatórios do Supabase
+      if (!headers.has('apikey')) {
+        headers.set('apikey', supabaseKey);
+      }
+      if (!headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${supabaseKey}`);
+      }
+      
+      // Garantir Content-Type para requisições com body
+      if (options.body && !headers.has('Content-Type')) {
+        headers.set('Content-Type', 'application/json');
+      }
+      
+      // Garantir Prefer header para upsert
+      if (options.method === 'POST' || options.method === 'PATCH' || options.method === 'PUT') {
+        if (!headers.has('Prefer')) {
+          headers.set('Prefer', 'return=representation');
+        }
+      }
       
       return fetch(url, { ...options, headers }).catch((error) => {
         console.error('❌ Erro no fetch para:', url);

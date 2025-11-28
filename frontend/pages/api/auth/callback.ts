@@ -107,28 +107,58 @@ export default async function handler(
 
     // Salvar usuário no banco
     console.log('🔄 Salvando usuário no banco...');
-    const { data: user, error: dbError } = await supabase
+    
+    // Verificar se usuário já existe
+    const { data: existingUser, error: selectError } = await supabase
       .from('users')
-      .upsert({
-        google_id: userInfo.id,
-        email: userInfo.email,
-        name: userInfo.name,
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null
-      }, {
-        onConflict: 'google_id'
-      })
-      .select()
+      .select('id')
+      .eq('google_id', userInfo.id)
       .single();
-
-    if (dbError) {
-      console.error('❌ Erro ao salvar no banco:', dbError);
-      console.error('Código:', dbError.code);
-      console.error('Mensagem:', dbError.message);
-      console.error('Detalhes:', dbError.details);
-      throw dbError;
+    
+    let user;
+    if (existingUser) {
+      // Atualizar usuário existente
+      const { data: updatedUser, error: updateError } = await supabase
+        .from('users')
+        .update({
+          email: userInfo.email,
+          name: userInfo.name,
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null
+        })
+        .eq('id', existingUser.id)
+        .select()
+        .single();
+      
+      if (updateError) {
+        console.error('❌ Erro ao atualizar usuário:', updateError);
+        throw updateError;
+      }
+      user = updatedUser;
+    } else {
+      // Criar novo usuário
+      const { data: newUser, error: insertError } = await supabase
+        .from('users')
+        .insert({
+          google_id: userInfo.id,
+          email: userInfo.email,
+          name: userInfo.name,
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null
+        })
+        .select()
+        .single();
+      
+      if (insertError) {
+        console.error('❌ Erro ao inserir usuário:', insertError);
+        throw insertError;
+      }
+      user = newUser;
     }
+    
+    // Se chegou aqui, não há erro
 
     console.log('✅ Usuário salvo no banco:', user.id);
 
