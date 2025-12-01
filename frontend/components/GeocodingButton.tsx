@@ -15,9 +15,13 @@ export function GeocodingButton({ onComplete }: GeocodingButtonProps) {
 
   const loadStats = async () => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/geocoding/stats`, {
+      // Usar rota de API do Next.js (mesmo domínio)
+      const response = await fetch('/api/geocoding/stats', {
         credentials: 'include'
       });
+      if (!response.ok) {
+        throw new Error('Erro ao carregar stats');
+      }
       const data = await response.json();
       setStats(data);
     } catch (error) {
@@ -33,12 +37,17 @@ export function GeocodingButton({ onComplete }: GeocodingButtonProps) {
     try {
       setProcessing(true);
       
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/geocoding/process`, {
+      // Usar rota de API do Next.js (mesmo domínio)
+      const response = await fetch('/api/geocoding/process', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ limit: 100 })
       });
+
+      if (!response.ok) {
+        throw new Error('Erro ao processar');
+      }
 
       const result = await response.json();
       
