@@ -1,10 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { requireAuth } from '../../../../lib/api-server/auth';
-import { getBackendUrl } from '../../../../lib/api-server/utils';
+import { getOAuth2Client } from '../../../../lib/api-server/google.config';
+import { supabase } from '../../../../lib/api-server/supabase.config';
+import { google } from 'googleapis';
 
 /**
  * GET /api/photos/[id]/image
- * Proxy para a imagem do backend
+ * Busca imagem diretamente do Google Drive usando credenciais do usuário
  * Isso resolve o problema de cookies não serem enviados em requisições cross-origin
  */
 export default async function handler(
@@ -22,77 +24,76 @@ export default async function handler(
       return res.status(400).json({ error: 'ID de foto inválido' });
     }
 
-    // Verificar autenticação
+    // Verificar autenticação e obter credenciais
     const auth = await requireAuth(req);
     if (!auth) {
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
-    // Obter URL do backend
-    const backendUrl = getBackendUrl();
-    const imageUrl = `${backendUrl}/api/photos/${id}/image`;
+    // Buscar foto no banco para obter drive_id e mime_type
+    const { data: photo, error: photoError } = await supabase
+      .from('photos')
+      .select('drive_id, mime_type, name, thumbnail_url')
+      .eq('id', id)
+      .eq('user_id', auth.userId)
+      .single();
 
-    // Fazer requisição para o backend com os cookies
-    const cookieHeader = req.headers.cookie || '';
-    
-    // Log para debug (apenas em desenvolvimento)
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🖼️ Proxy de imagem:', {
-        photoId: id,
-        backendUrl,
-        hasCookies: !!cookieHeader,
-      });
+    if (photoError || !photo) {
+      return res.status(404).json({ error: 'Foto não encontrada' });
     }
-    
-    const response = await fetch(imageUrl, {
-      method: 'GET',
-      headers: {
-        'Cookie': cookieHeader,
-        'User-Agent': req.headers['user-agent'] || 'PhotoFinder-Proxy',
-      },
-    });
 
-    if (!response.ok) {
-      // Se o backend retornar erro, tentar obter mensagem de erro
-      let errorMessage = 'Erro ao carregar imagem';
-      try {
-        const errorData = await response.json();
-        errorMessage = errorData.error || errorMessage;
-      } catch {
-        // Se não for JSON, tentar texto
+    // Verificar se é HEIC - se for, usar thumbnail ou retornar erro
+    const isHEIC = photo.mime_type?.toLowerCase().includes('heif') || 
+                   photo.mime_type?.toLowerCase().includes('heic');
+    
+    if (isHEIC) {
+      // Para HEIC, tentar usar thumbnail se disponível
+      if (photo.thumbnail_url) {
         try {
-          errorMessage = await response.text() || errorMessage;
-        } catch {
-          // Ignorar erro ao ler resposta
+          const thumbnailResponse = await fetch(photo.thumbnail_url);
+          if (thumbnailResponse.ok) {
+            const thumbnailBuffer = await thumbnailResponse.arrayBuffer();
+            res.setHeader('Content-Type', 'image/jpeg');
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            return res.send(Buffer.from(thumbnailBuffer));
+          }
+        } catch (error) {
+          console.warn('Erro ao carregar thumbnail:', error);
         }
       }
       
-      console.error('❌ Erro do backend:', {
-        status: response.status,
-        statusText: response.statusText,
-        error: errorMessage,
-      });
-      
-      return res.status(response.status).json({ 
-        error: errorMessage 
+      // Se não tiver thumbnail, retornar erro informando que precisa do backend para conversão
+      return res.status(400).json({ 
+        error: 'Formato HEIC requer conversão. Use o backend para visualizar.' 
       });
     }
 
-    // Obter o tipo de conteúdo da resposta
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
-    const cacheControl = response.headers.get('cache-control') || 'public, max-age=3600';
+    // Para outros formatos, buscar diretamente do Google Drive
+    const oauth2Client = getOAuth2Client();
+    const drive = google.drive({ version: 'v3', auth: oauth2Client });
 
-    // Configurar headers da resposta
+    // Buscar arquivo do Google Drive como arraybuffer
+    const driveResponse = await drive.files.get(
+      { 
+        fileId: photo.drive_id, 
+        alt: 'media' 
+      },
+      { 
+        responseType: 'arraybuffer' 
+      }
+    );
+
+    // Configurar headers
+    const contentType = photo.mime_type || 'image/jpeg';
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', cacheControl);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
 
-    // Obter o buffer da imagem
-    const imageBuffer = await response.arrayBuffer();
-
-    // Enviar a imagem
-    res.send(Buffer.from(imageBuffer));
+    // Converter arraybuffer para buffer e enviar
+    const imageBuffer = Buffer.from(driveResponse.data as ArrayBuffer);
+    res.send(imageBuffer);
+    
   } catch (error: any) {
-    console.error('Erro ao fazer proxy da imagem:', error);
+    console.error('Erro ao carregar imagem:', error);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Falha ao carregar imagem' });
     }
