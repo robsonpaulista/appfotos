@@ -200,7 +200,7 @@ export default function FacesPage() {
                         onClick={() => window.open(`/photo/${photo.id}`, '_blank')}
                       >
                         <img
-                          src={photo.thumbnail_url || `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/photos/${photo.id}/image`}
+                          src={photo.thumbnail_url || `/api/photos/${photo.id}/image`}
                           alt={photo.name}
                           className="w-full h-full object-cover"
                         />

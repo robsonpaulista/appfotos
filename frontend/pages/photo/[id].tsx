@@ -94,8 +94,8 @@ export default function PhotoDetail() {
       setPersonTag(data.person_tag || '');
       setLocationName(data.location_name || '');
       
-      // Usar rota de imagem que faz conversão HEIC→JPEG automaticamente
-      const imageUrl = `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/photos/${data.id}/image`;
+      // Usar rota de proxy do Next.js (mesmo domínio = cookies funcionam)
+      const imageUrl = `/api/photos/${data.id}/image`;
       setImgSrc(imageUrl);
       setImgError(false);
     } catch (err: any) {

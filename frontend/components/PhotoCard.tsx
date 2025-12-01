@@ -12,8 +12,8 @@ interface PhotoCardProps {
 }
 
 export function PhotoCard({ photo, onClick, isSelectionMode = false, isSelected = false, onToggleSelect }: PhotoCardProps) {
-  // Usar rota /image que faz conversão HEIC automaticamente
-  const imageUrl = `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/photos/${photo.id}/image`;
+  // Usar rota de proxy do Next.js (mesmo domínio = cookies funcionam)
+  const imageUrl = `/api/photos/${photo.id}/image`;
   const [isEditingPerson, setIsEditingPerson] = React.useState(false);
   const [personName, setPersonName] = React.useState(photo.person_tag || '');
   const [saving, setSaving] = React.useState(false);

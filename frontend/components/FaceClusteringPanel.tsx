@@ -192,7 +192,7 @@ export function FaceClusteringPanel() {
                         title={photo.name}
                       >
                         <img
-                          src={photo.thumbnail_url || `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/photos/${photo.id}/image`}
+                          src={photo.thumbnail_url || `/api/photos/${photo.id}/image`}
                           alt={photo.name}
                           className="w-16 h-16 rounded-lg object-cover border-2 border-white shadow-md hover:scale-110 transition-transform cursor-pointer"
                           onClick={() => window.open(`/photo/${photo.id}`, '_blank')}
