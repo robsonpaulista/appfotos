@@ -113,23 +113,24 @@ export default async function handler(
 
     for (const file of files) {
       try {
-        // Verificar se foto já existe
+        // Verificar se foto já existe (usar drive_id que é o campo correto)
         const { data: existing } = await supabase
           .from('photos')
           .select('id')
-          .eq('google_id', file.id)
+          .eq('drive_id', file.id)
           .eq('user_id', userId)
           .single();
 
-        const photoData = {
-          google_id: file.id,
+        const photoData: any = {
+          drive_id: file.id,
           user_id: userId,
           name: file.name || 'Sem nome',
           created_at: file.createdTime || new Date().toISOString(),
-          updated_at: file.modifiedTime || new Date().toISOString(),
-          size: file.size ? parseInt(file.size) : null,
+          modified_at: file.modifiedTime || new Date().toISOString(),
+          size_bytes: file.size ? parseInt(file.size) : null,
           thumbnail_url: file.thumbnailLink || null,
-          web_view_link: file.webViewLink || null
+          storage_url: file.webViewLink || null,
+          mime_type: 'image/jpeg' // Será atualizado quando processar metadados
         };
 
         if (existing) {

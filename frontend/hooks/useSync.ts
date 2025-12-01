@@ -29,6 +29,30 @@ export function useSync() {
     return () => clearInterval(interval);
   }, [checkStatus, syncStatus?.status]);
 
+  const processChunks = useCallback(async (syncId: string, pageToken?: string) => {
+    try {
+      const result = await api.processChunk(syncId, pageToken);
+      
+      // Atualizar status com os dados mais recentes
+      await checkStatus();
+      
+      if (!result.done && result.nextPageToken) {
+        // Continuar processando próximo chunk após um pequeno delay
+        setTimeout(() => {
+          processChunks(syncId, result.nextPageToken);
+        }, 500);
+      } else if (result.done) {
+        // Sincronização concluída
+        await checkStatus();
+      }
+    } catch (err) {
+      console.error('Erro ao processar chunk:', err);
+      setError('Erro ao processar sincronização');
+      // Marcar como falha
+      await checkStatus();
+    }
+  }, [checkStatus]);
+
   const startSync = async (analyzeWithVision: boolean = false, folderId?: string, tags?: { person?: string; location?: string; event?: string }) => {
     try {
       setLoading(true);
@@ -42,10 +66,18 @@ export function useSync() {
         photos_updated: 0,
       } as any);
       
-      await api.startSync(analyzeWithVision, folderId, tags);
+      const response = await api.startSync(analyzeWithVision, folderId, tags);
       
-      // Verificar status após 2 segundos
-      setTimeout(checkStatus, 2000);
+      // Atualizar status
+      await checkStatus();
+      
+      // Iniciar processamento de chunks com o syncId retornado
+      if (response.syncId) {
+        // Aguardar um pouco antes de começar a processar
+        setTimeout(() => {
+          processChunks(response.syncId);
+        }, 500);
+      }
     } catch (err) {
       console.error('Erro ao iniciar sincronização:', err);
       setError('Falha ao iniciar sincronização');

@@ -100,8 +100,9 @@ class ApiClient {
   }
 
   // Sync endpoints
-  async startSync(analyzeWithVision: boolean = false, folderId?: string, tags?: { person?: string; location?: string; event?: string }): Promise<void> {
-    await this.client.post('/api/sync/start', { analyzeWithVision, folderId, tags });
+  async startSync(analyzeWithVision: boolean = false, folderId?: string, tags?: { person?: string; location?: string; event?: string }): Promise<{ syncId: string }> {
+    const { data } = await this.client.post('/api/sync/start', { analyzeWithVision, folderId, tags });
+    return data;
   }
 
   async getSyncStatus(): Promise<SyncEvent> {
@@ -120,6 +121,11 @@ class ApiClient {
 
   async cancelSync(): Promise<void> {
     await this.client.post('/api/sync/cancel');
+  }
+
+  async processChunk(syncId: string, pageToken?: string): Promise<any> {
+    const { data } = await this.client.post('/api/sync/process-chunk', { syncId, pageToken });
+    return data;
   }
 
   // Analysis endpoints
