@@ -78,36 +78,85 @@ export default async function handler(
       return res.status(404).json({ error: 'Foto não encontrada' });
     }
 
-    // Verificar se é HEIC - se for, usar thumbnail ou retornar erro
+    // Configurar cliente do Google Drive
+    const oauth2Client = getOAuth2Client();
+    const drive = google.drive({ version: 'v3', auth: oauth2Client });
+
+    // Verificar se é HEIC - se for, converter para JPEG
     const isHEIC = photo.mime_type?.toLowerCase().includes('heif') || 
                    photo.mime_type?.toLowerCase().includes('heic');
     
     if (isHEIC) {
-      // Para HEIC, tentar usar thumbnail se disponível
-      if (photo.thumbnail_url) {
-        try {
-          const thumbnailResponse = await fetch(photo.thumbnail_url);
-          if (thumbnailResponse.ok) {
-            const thumbnailBuffer = await thumbnailResponse.arrayBuffer();
-            res.setHeader('Content-Type', 'image/jpeg');
-            res.setHeader('Cache-Control', 'public, max-age=86400');
-            return res.send(Buffer.from(thumbnailBuffer));
+      try {
+        // Buscar arquivo HEIC do Google Drive
+        const driveResponse = await drive.files.get(
+          { 
+            fileId: photo.drive_id, 
+            alt: 'media' 
+          },
+          { 
+            responseType: 'arraybuffer' 
           }
-        } catch (error) {
-          console.warn('Erro ao carregar thumbnail:', error);
+        );
+
+        const heicBuffer = Buffer.from(driveResponse.data as ArrayBuffer);
+        
+        // Converter HEIC para JPEG
+        const heicConvert = (await import('heic-convert')).default;
+        const sharp = (await import('sharp')).default;
+        
+        console.log(`🔄 Convertendo HEIC para JPEG: ${photo.name}`);
+        const startTime = Date.now();
+        
+        // Converter HEIC para JPEG
+        const jpegBuffer = await heicConvert({
+          buffer: heicBuffer,
+          format: 'JPEG',
+          quality: 0.95 // Alta qualidade (95%)
+        });
+        
+        // Otimizar com Sharp
+        const optimizedBuffer = await sharp(jpegBuffer)
+          .jpeg({ 
+            quality: 95, 
+            progressive: true,
+            mozjpeg: true 
+          })
+          .toBuffer();
+        
+        const elapsedTime = Date.now() - startTime;
+        const sizeInMB = optimizedBuffer.length / 1024 / 1024;
+        console.log(`✅ Convertido em ${elapsedTime}ms (${sizeInMB.toFixed(2)}MB)`);
+        
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // 24 horas
+        return res.send(optimizedBuffer);
+      } catch (conversionError: any) {
+        console.error('Erro ao converter HEIC:', conversionError);
+        
+        // Fallback: tentar usar thumbnail se disponível
+        if (photo.thumbnail_url) {
+          try {
+            const thumbnailResponse = await fetch(photo.thumbnail_url);
+            if (thumbnailResponse.ok) {
+              const thumbnailBuffer = await thumbnailResponse.arrayBuffer();
+              res.setHeader('Content-Type', 'image/jpeg');
+              res.setHeader('Cache-Control', 'public, max-age=86400');
+              return res.send(Buffer.from(thumbnailBuffer));
+            }
+          } catch (error) {
+            console.warn('Erro ao carregar thumbnail:', error);
+          }
         }
+        
+        // Se tudo falhar, retornar erro
+        return res.status(500).json({ 
+          error: 'Falha ao converter imagem HEIC' 
+        });
       }
-      
-      // Se não tiver thumbnail, retornar erro informando que precisa do backend para conversão
-      return res.status(400).json({ 
-        error: 'Formato HEIC requer conversão. Use o backend para visualizar.' 
-      });
     }
 
     // Para outros formatos, buscar diretamente do Google Drive
-    const oauth2Client = getOAuth2Client();
-    const drive = google.drive({ version: 'v3', auth: oauth2Client });
-
     // Buscar arquivo do Google Drive como arraybuffer
     const driveResponse = await drive.files.get(
       { 
