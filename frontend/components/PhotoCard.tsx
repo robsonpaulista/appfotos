@@ -77,7 +77,19 @@ export function PhotoCard({ photo, onClick, isSelectionMode = false, isSelected 
     try {
       setSaving(true);
       const api = (await import('@/utils/api')).api;
-      await api.updatePhoto(photo.id, { person_tag: personName || null });
+      const axios = (await import('axios')).default;
+      
+      // Construir URL com token se disponível (fallback para produção)
+      let url = `/api/photos/${photo.id}`;
+      if (imageToken) {
+        url += `?token=${encodeURIComponent(imageToken)}`;
+      }
+      
+      await axios.put(url, { person_tag: personName || null }, {
+        withCredentials: true,
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
       setIsEditingPerson(false);
       // Atualizar foto localmente
       photo.person_tag = personName || null;

@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { api } from '@/utils/api';
+import { useAuth } from '@/hooks/useAuth';
+import axios from 'axios';
 
 interface BulkEditBarProps {
   selectedCount: number;
@@ -11,6 +13,7 @@ interface BulkEditBarProps {
 type EditMode = 'person' | 'location' | 'event' | null;
 
 export function BulkEditBar({ selectedCount, selectedPhotos, onComplete, onCancel }: BulkEditBarProps) {
+  const { imageToken } = useAuth();
   const [editMode, setEditMode] = useState<EditMode>(null);
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
@@ -47,9 +50,18 @@ export function BulkEditBar({ selectedCount, selectedPhotos, onComplete, onCance
       }
 
       // Atualizar todas as fotos selecionadas
-      const promises = selectedPhotos.map(photoId =>
-        api.updatePhoto(photoId, updateData)
-      );
+      const promises = selectedPhotos.map(photoId => {
+        // Construir URL com token se disponível (fallback para produção)
+        let url = `/api/photos/${photoId}`;
+        if (imageToken) {
+          url += `?token=${encodeURIComponent(imageToken)}`;
+        }
+        
+        return axios.put(url, updateData, {
+          withCredentials: true,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      });
 
       await Promise.all(promises);
       
