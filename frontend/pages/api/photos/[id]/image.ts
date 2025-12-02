@@ -102,7 +102,7 @@ export default async function handler(
         const heicBuffer = Buffer.from(driveResponse.data as ArrayBuffer);
         
         // Converter HEIC para JPEG
-        const heicConvert = (await import('heic-convert')).default;
+        const heicConvert = (await import('heic-convert')).default as (options: { buffer: Buffer; format: 'JPEG' | 'PNG'; quality?: number }) => Promise<Buffer>;
         const sharp = (await import('sharp')).default;
         
         console.log(`🔄 Convertendo HEIC para JPEG: ${photo.name}`);
