@@ -32,14 +32,22 @@ export default async function handler(
       return res.json({ authenticated: false });
     }
 
-    res.json({
+    // Gerar token temporário para requisições de imagem (base64 do userId)
+    // Em produção, deveria ser um JWT assinado com expiração
+    const imageToken = Buffer.from(user.id, 'utf-8').toString('base64');
+    
+    const responseData = {
       authenticated: true,
       user: {
-        id: user.id,
-        email: user.email,
-        name: user.name
-      }
-    });
+        id: String(user.id),
+        email: String(user.email || ''),
+        name: String(user.name || '')
+      },
+      imageToken: String(imageToken)
+    };
+    
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.status(200).send(JSON.stringify(responseData));
   } catch (error: any) {
     console.error('Erro ao verificar status:', error);
     res.status(500).json({ error: 'Falha ao verificar status de autenticação' });

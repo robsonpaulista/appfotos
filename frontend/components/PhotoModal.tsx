@@ -6,6 +6,7 @@ import { FaTimes, FaMapMarkerAlt, FaCalendar, FaUser, FaEdit, FaSave } from 'rea
 import type { Photo } from '@/types/photo';
 import { photosApi } from '@/utils/api';
 import { formatDate, formatDateTime, formatFacesCount, formatCoordinates } from '@/utils/formatters';
+import { useAuth } from '@/hooks/useAuth';
 
 interface PhotoModalProps {
   photo: Photo;
@@ -13,6 +14,7 @@ interface PhotoModalProps {
 }
 
 export default function PhotoModal({ photo, onClose }: PhotoModalProps) {
+  const { imageToken } = useAuth();
   const [editMode, setEditMode] = useState<boolean>(false);
   const [personTag, setPersonTag] = useState<string>(photo.person_tag || '');
   const [locationName, setLocationName] = useState<string>(photo.location_name || '');
@@ -75,7 +77,7 @@ export default function PhotoModal({ photo, onClose }: PhotoModalProps) {
         {/* Imagem */}
         <div className="md:w-2/3 bg-black relative">
           <Image
-            src={photosApi.getImageUrl(photo.id)}
+            src={photosApi.getImageUrl(photo.id, imageToken)}
             alt={photo.name}
             width={photo.width || 1200}
             height={photo.height || 800}

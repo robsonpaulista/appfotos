@@ -29,7 +29,6 @@ export function parseSessionCookie(req: NextApiRequest): SessionData | null {
   if (!sessionCookie) return null;
 
   try {
-    // O cookie já foi decodificado no split acima
     const session = JSON.parse(sessionCookie);
     
     // Verificar se expirou
@@ -54,7 +53,6 @@ export async function requireAuth(req: NextApiRequest): Promise<{ userId: string
   }
 
   try {
-    // Buscar tokens do usuário
     const { data: user, error } = await supabase
       .from('users')
       .select('id, access_token, refresh_token, token_expiry')

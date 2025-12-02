@@ -15,10 +15,16 @@ export default async function handler(
   }
 
   try {
+    console.log('📸 Requisição para /api/photos');
+    console.log('🍪 Cookies recebidos:', req.headers.cookie ? 'Sim' : 'Não');
+    
     const auth = await requireAuth(req);
     if (!auth) {
+      console.error('❌ Autenticação falhou - usuário não autenticado');
       return res.status(401).json({ error: 'Não autenticado' });
     }
+    
+    console.log('✅ Usuário autenticado:', auth.userId);
 
     const {
       person,
@@ -105,7 +111,12 @@ export default async function handler(
 
     const { data, error, count } = await query;
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Erro na query do Supabase:', error);
+      throw error;
+    }
+
+    console.log(`✅ Fotos encontradas: ${data?.length || 0} de ${count || 0} total`);
 
     res.json({
       photos: data || [],

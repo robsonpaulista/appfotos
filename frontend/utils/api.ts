@@ -198,9 +198,13 @@ export const photosApi = {
     
     return response.data;
   },
-  getImageUrl: (photoId: string) => {
+  getImageUrl: (photoId: string, token?: string) => {
     const backendUrl = BASE_URL || '/api';
-    return `${backendUrl}/photos/${photoId}/image`;
+    const baseUrl = `${backendUrl}/photos/${photoId}/image`;
+    if (token) {
+      return `${baseUrl}?token=${encodeURIComponent(token)}`;
+    }
+    return baseUrl;
   },
   reanalyzePhotos: (photoIds?: string[], force?: boolean) => api.reanalyzePhotos(photoIds, force),
 };

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { photosApi } from '@/utils/api';
 import type { Photo } from '@/types/photo';
+import { useAuth } from '@/hooks/useAuth';
 
 interface EmotionData {
   joy: string;
@@ -15,6 +16,7 @@ interface AnalyzedPhoto extends Photo {
 }
 
 export const FaceAnalysisTest: React.FC = () => {
+  const { imageToken } = useAuth();
   const [photos, setPhotos] = useState<AnalyzedPhoto[]>([]);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -331,7 +333,7 @@ export const FaceAnalysisTest: React.FC = () => {
             {/* Imagem */}
             <div className="relative aspect-video bg-slate-100">
               <Image
-                src={photosApi.getImageUrl(photo.id)}
+                src={photosApi.getImageUrl(photo.id, imageToken)}
                 alt={photo.name}
                 fill
                 className="object-cover"

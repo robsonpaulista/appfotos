@@ -50,3 +50,6 @@ Acesse: `https://seu-projeto.vercel.app/verificacao-projeto.txt`
 Se aparecer o texto do PhotoFinder, o problema é cache do navegador.
 Se aparecer conteúdo do aerocost, o problema é a configuração do Vercel.
 
+
+
+

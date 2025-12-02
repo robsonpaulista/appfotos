@@ -14,7 +14,18 @@ export function useAuth() {
   const checkAuthStatus = async () => {
     try {
       setLoading(true);
-      const status = await api.getAuthStatus();
+      const response = await api.getAuthStatus();
+      
+      const status = response as AuthStatus;
+      
+      // Se não tiver imageToken mas tiver user.id, gerar token no frontend como fallback
+      if (status.authenticated && status.user && !status.imageToken) {
+        // Gerar token no frontend usando base64 do userId
+        if (typeof window !== 'undefined' && typeof btoa !== 'undefined') {
+          status.imageToken = btoa(status.user.id);
+        }
+      }
+      
       setAuthStatus(status);
     } catch (err) {
       console.error('Erro ao verificar autenticação:', err);

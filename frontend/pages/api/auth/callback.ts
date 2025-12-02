@@ -172,10 +172,20 @@ export default async function handler(
 
     // Definir cookie de sessão (codificar JSON para URL-safe)
     const sessionCookie = encodeURIComponent(JSON.stringify(sessionData));
-    const isProduction = process.env.NODE_ENV === 'production';
-    res.setHeader('Set-Cookie', `session=${sessionCookie}; HttpOnly; ${isProduction ? 'Secure;' : ''} SameSite=Strict; Path=/; Max-Age=${24 * 60 * 60}`);
-
-    console.log('✅ Autenticação concluída com sucesso');
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL_URL;
+    
+    // Configurar cookie com opções corretas
+    // SameSite=None permite que cookies sejam enviados em requisições de imagem
+    // Secure é obrigatório quando SameSite=None (exceto em localhost)
+    const cookieOptions = [
+      `session=${sessionCookie}`,
+      'HttpOnly',
+      'Path=/',
+      `Max-Age=${24 * 60 * 60}`,
+      isProduction ? 'SameSite=None; Secure' : 'SameSite=None' // None permite cookies em requisições de imagem
+    ].filter(Boolean).join('; ');
+    
+    res.setHeader('Set-Cookie', cookieOptions);
     // Redirecionar para o frontend
     res.redirect(`${frontendUrl}?auth=success`);
   } catch (error: any) {

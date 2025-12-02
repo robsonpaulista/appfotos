@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Cluster {
   id: string;
@@ -16,9 +17,15 @@ interface Cluster {
 }
 
 export function FaceClusteringPanel() {
+  const { imageToken } = useAuth();
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [loading, setLoading] = useState(false);
   const [threshold, setThreshold] = useState(0.6);
+  
+  const getImageUrl = (photoId: string) => {
+    const baseUrl = `/api/photos/${photoId}/image`;
+    return imageToken ? `${baseUrl}?token=${encodeURIComponent(imageToken)}` : baseUrl;
+  };
 
   const handleCluster = async () => {
     try {
@@ -192,7 +199,7 @@ export function FaceClusteringPanel() {
                         title={photo.name}
                       >
                         <img
-                          src={photo.thumbnail_url || `/api/photos/${photo.id}/image`}
+                          src={photo.thumbnail_url || getImageUrl(photo.id)}
                           alt={photo.name}
                           className="w-16 h-16 rounded-lg object-cover border-2 border-white shadow-md hover:scale-110 transition-transform cursor-pointer"
                           onClick={() => window.open(`/photo/${photo.id}`, '_blank')}

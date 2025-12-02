@@ -15,8 +15,30 @@ export default async function handler(
   }
 
   try {
-    // Verificar autenticação
-    const auth = await requireAuth(req);
+    // Verificar autenticação - tentar cookie primeiro, depois token na query string
+    let auth = await requireAuth(req);
+    
+    // Se não autenticado via cookie, tentar token na query string
+    if (!auth) {
+      const { token } = req.query;
+      if (token && typeof token === 'string') {
+        try {
+          const userId = Buffer.from(token, 'base64').toString('utf-8');
+          const { data: user } = await supabase
+            .from('users')
+            .select('id')
+            .eq('id', userId)
+            .single();
+          
+          if (user) {
+            auth = { userId: user.id, user };
+          }
+        } catch {
+          // Ignorar erro
+        }
+      }
+    }
+    
     if (!auth) {
       return res.status(401).json({ error: 'Não autenticado' });
     }
@@ -47,4 +69,5 @@ export default async function handler(
     res.status(500).json({ error: 'Falha ao obter estatísticas' });
   }
 }
+
 

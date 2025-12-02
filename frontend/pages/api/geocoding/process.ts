@@ -16,8 +16,34 @@ export default async function handler(
   }
 
   try {
-    // Verificar autenticação
-    const auth = await requireAuth(req);
+    // Verificar autenticação - tentar cookie primeiro, depois token na query string
+    let auth = await requireAuth(req);
+    
+    // Se não autenticado via cookie, tentar token na query string ou body
+    if (!auth) {
+      const { token } = req.query;
+      const bodyToken = (req.body as any)?.token;
+      const tokenValue = token || bodyToken;
+      
+      if (tokenValue && typeof tokenValue === 'string') {
+        try {
+          const { supabase } = await import('../../../lib/api-server/supabase.config');
+          const userId = Buffer.from(tokenValue, 'base64').toString('utf-8');
+          const { data: user } = await supabase
+            .from('users')
+            .select('id')
+            .eq('id', userId)
+            .single();
+          
+          if (user) {
+            auth = { userId: user.id, user };
+          }
+        } catch {
+          // Ignorar erro
+        }
+      }
+    }
+    
     if (!auth) {
       return res.status(401).json({ error: 'Não autenticado' });
     }
@@ -52,4 +78,5 @@ export default async function handler(
     res.status(500).json({ error: 'Falha ao processar geocoding' });
   }
 }
+
 

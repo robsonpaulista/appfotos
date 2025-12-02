@@ -19,11 +19,10 @@ export default async function handler(
     const cookieOptions = [
       'session=',
       'HttpOnly',
-      isProduction ? 'Secure' : '',
-      'SameSite=Lax',
       'Path=/',
       'Max-Age=0', // Expirar imediatamente
-      'Expires=Thu, 01 Jan 1970 00:00:00 GMT'
+      'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+      isProduction ? 'SameSite=None; Secure' : 'SameSite=None' // Mesma configuração do login
     ].filter(Boolean).join('; ');
 
     res.setHeader('Set-Cookie', cookieOptions);
@@ -33,4 +32,5 @@ export default async function handler(
     res.status(500).json({ error: 'Falha ao fazer logout' });
   }
 }
+
 

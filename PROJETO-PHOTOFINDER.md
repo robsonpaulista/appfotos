@@ -28,3 +28,6 @@
 
 **IMPORTANTE:** O Vercel deve usar o diretório `frontend/` como root.
 
+
+
+

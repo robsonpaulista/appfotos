@@ -12,7 +12,12 @@ interface Person {
 }
 
 export default function FacesPage() {
-  const { authenticated, loading: authLoading } = useAuth();
+  const { authenticated, loading: authLoading, imageToken } = useAuth();
+  
+  const getImageUrl = (photoId: string) => {
+    const baseUrl = `/api/photos/${photoId}/image`;
+    return imageToken ? `${baseUrl}?token=${encodeURIComponent(imageToken)}` : baseUrl;
+  };
   const [persons, setPersons] = useState<Person[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
@@ -200,7 +205,7 @@ export default function FacesPage() {
                         onClick={() => window.open(`/photo/${photo.id}`, '_blank')}
                       >
                         <img
-                          src={photo.thumbnail_url || `/api/photos/${photo.id}/image`}
+                          src={photo.thumbnail_url || getImageUrl(photo.id)}
                           alt={photo.name}
                           className="w-full h-full object-cover"
                         />

@@ -1,22 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '@/utils/api';
+import { useAuth } from '@/hooks/useAuth';
 
 interface GeocodingButtonProps {
   onComplete?: () => void;
 }
 
 export function GeocodingButton({ onComplete }: GeocodingButtonProps) {
+  const { imageToken } = useAuth();
   const [stats, setStats] = useState<any>(null);
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
-    loadStats();
-  }, []);
+    if (imageToken) {
+      loadStats();
+    }
+  }, [imageToken]);
 
   const loadStats = async () => {
     try {
-      // Usar rota de API do Next.js (mesmo domínio)
-      const response = await fetch('/api/geocoding/stats', {
+      // Usar rota de API do Next.js com token se disponível
+      const url = imageToken 
+        ? `/api/geocoding/stats?token=${encodeURIComponent(imageToken)}`
+        : '/api/geocoding/stats';
+      
+      const response = await fetch(url, {
         credentials: 'include'
       });
       if (!response.ok) {
@@ -25,7 +33,7 @@ export function GeocodingButton({ onComplete }: GeocodingButtonProps) {
       const data = await response.json();
       setStats(data);
     } catch (error) {
-      console.error('Erro ao carregar stats de GPS:', error);
+      // Silenciar erro se não autenticado
     }
   };
 
@@ -37,12 +45,16 @@ export function GeocodingButton({ onComplete }: GeocodingButtonProps) {
     try {
       setProcessing(true);
       
-      // Usar rota de API do Next.js (mesmo domínio)
-      const response = await fetch('/api/geocoding/process', {
+      // Usar rota de API do Next.js com token se disponível
+      const url = imageToken 
+        ? `/api/geocoding/process?token=${encodeURIComponent(imageToken)}`
+        : '/api/geocoding/process';
+      
+      const response = await fetch(url, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: 100 })
+        body: JSON.stringify({ limit: 100, token: imageToken })
       });
 
       if (!response.ok) {

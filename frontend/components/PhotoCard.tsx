@@ -2,6 +2,7 @@ import React from 'react';
 import type { Photo } from '@/types/photo';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useAuth } from '@/hooks/useAuth';
 
 interface PhotoCardProps {
   photo: Photo;
@@ -12,13 +13,36 @@ interface PhotoCardProps {
 }
 
 export function PhotoCard({ photo, onClick, isSelectionMode = false, isSelected = false, onToggleSelect }: PhotoCardProps) {
-  // Usar rota de proxy do Next.js (mesmo domínio = cookies funcionam)
-  const imageUrl = `/api/photos/${photo.id}/image`;
+  const { imageToken, authenticated } = useAuth();
+  
+  // Usar rota de proxy do Next.js com token na query string se disponível
+  const getImageUrl = () => {
+    const baseUrl = `/api/photos/${photo.id}/image`;
+    if (imageToken) {
+      const urlWithToken = `${baseUrl}?token=${encodeURIComponent(imageToken)}`;
+      return urlWithToken;
+    }
+    return baseUrl;
+  };
+  
+  const imageUrl = React.useMemo(() => getImageUrl(), [photo.id, imageToken]);
   const [isEditingPerson, setIsEditingPerson] = React.useState(false);
   const [personName, setPersonName] = React.useState(photo.person_tag || '');
   const [saving, setSaving] = React.useState(false);
-  const [imgSrc, setImgSrc] = React.useState(imageUrl);
+  const [imgSrc, setImgSrc] = React.useState(() => {
+    // Inicializar com thumbnail se disponível, senão usar URL com token quando disponível
+    return photo.thumbnail_url || imageUrl;
+  });
   const [imgError, setImgError] = React.useState(false);
+  
+  // Atualizar URL da imagem quando imageToken mudar ou quando autenticado
+  React.useEffect(() => {
+    if (authenticated) {
+      // Se autenticado, sempre usar URL com token quando disponível
+      setImgSrc(imageUrl);
+      setImgError(false);
+    }
+  }, [imageUrl, authenticated]);
 
   const handleImageError = () => {
     // Se conversão falhar, tenta thumbnail como fallback

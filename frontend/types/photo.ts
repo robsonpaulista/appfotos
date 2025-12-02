@@ -93,4 +93,5 @@ export interface User {
 export interface AuthStatus {
   authenticated: boolean;
   user?: User;
+  imageToken?: string; // Token temporário para requisições de imagem
 }

@@ -18,14 +18,50 @@ export default async function handler(
   }
 
   try {
-    const { id } = req.query;
+    const { id, token } = req.query;
     
     if (!id || typeof id !== 'string') {
       return res.status(400).json({ error: 'ID de foto inválido' });
     }
 
-    // Verificar autenticação e obter credenciais
-    const auth = await requireAuth(req);
+    // Verificar autenticação - tentar cookie primeiro, depois token na query string
+    let auth = await requireAuth(req);
+    
+    // Se não autenticado via cookie, tentar token na query string
+    if (!auth && token && typeof token === 'string') {
+      try {
+        // Token é simplesmente o userId codificado em base64 (temporário, para desenvolvimento)
+        // Em produção, deveria ser um JWT assinado
+        const userId = Buffer.from(token, 'base64').toString('utf-8');
+        
+        // Buscar usuário no banco
+        const { data: user, error } = await supabase
+          .from('users')
+          .select('id, access_token, refresh_token, token_expiry')
+          .eq('id', userId)
+          .single();
+        
+        if (!error && user) {
+          auth = {
+            userId: user.id,
+            user
+          };
+          
+          // Configurar credenciais do Google
+          if (user.access_token) {
+            const { setCredentials } = await import('../../../../lib/api-server/google.config');
+            setCredentials({
+              access_token: user.access_token,
+              refresh_token: user.refresh_token,
+              expiry_date: user.token_expiry ? new Date(user.token_expiry).getTime() : undefined
+            });
+          }
+        }
+      } catch (tokenError) {
+        // Ignorar erro do token, continuar sem autenticação
+      }
+    }
+    
     if (!auth) {
       return res.status(401).json({ error: 'Não autenticado' });
     }

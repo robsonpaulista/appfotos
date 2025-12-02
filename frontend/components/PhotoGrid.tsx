@@ -7,6 +7,7 @@ import type { Photo } from '@/types/photo';
 import { formatDate } from '@/utils/formatters';
 import { photosApi } from '@/utils/api';
 import PhotoModal from './PhotoModal';
+import { useAuth } from '@/hooks/useAuth';
 
 interface PhotoGridProps {
   photos: Photo[];
@@ -14,6 +15,7 @@ interface PhotoGridProps {
 }
 
 export default function PhotoGrid({ photos, loading = false }: PhotoGridProps) {
+  const { imageToken } = useAuth();
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
 
   if (loading) {
@@ -51,7 +53,7 @@ export default function PhotoGrid({ photos, loading = false }: PhotoGridProps) {
           >
             <div className="aspect-square relative">
               <Image
-                src={photo.thumbnail_url || photosApi.getImageUrl(photo.id)}
+                src={photo.thumbnail_url || photosApi.getImageUrl(photo.id, imageToken)}
                 alt={photo.name}
                 fill
                 className="object-cover"

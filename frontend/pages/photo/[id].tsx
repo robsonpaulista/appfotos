@@ -67,7 +67,7 @@ const SparklesIcon = () => (
 export default function PhotoDetail() {
   const router = useRouter();
   const { id } = router.query;
-  const { authenticated, loading: authLoading } = useAuth();
+  const { authenticated, loading: authLoading, imageToken } = useAuth();
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,8 +94,9 @@ export default function PhotoDetail() {
       setPersonTag(data.person_tag || '');
       setLocationName(data.location_name || '');
       
-      // Usar rota de proxy do Next.js (mesmo domínio = cookies funcionam)
-      const imageUrl = `/api/photos/${data.id}/image`;
+      // Usar rota de proxy do Next.js com token se disponível
+      const baseUrl = `/api/photos/${data.id}/image`;
+      const imageUrl = imageToken ? `${baseUrl}?token=${encodeURIComponent(imageToken)}` : baseUrl;
       setImgSrc(imageUrl);
       setImgError(false);
     } catch (err: any) {
