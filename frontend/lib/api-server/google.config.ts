@@ -28,11 +28,23 @@ export function getLibrarySourceId(): string {
   return process.env.DRIVE_FOLDER_ID || 'library';
 }
 
+function normalizeServiceAccount(
+  credentials: Record<string, unknown>
+): Record<string, unknown> {
+  const privateKey = credentials.private_key;
+  // Alguns painéis de env colam a chave com \\n literal em vez de quebras reais
+  if (typeof privateKey === 'string' && privateKey.includes('\\n') && !privateKey.includes('\n')) {
+    return { ...credentials, private_key: privateKey.replace(/\\n/g, '\n') };
+  }
+  return credentials;
+}
+
 function loadServiceAccountCredentials(): Record<string, unknown> {
   const jsonEnv = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (jsonEnv) {
     try {
-      return JSON.parse(jsonEnv);
+      const trimmed = jsonEnv.trim();
+      return normalizeServiceAccount(JSON.parse(trimmed));
     } catch {
       throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON inválido (JSON malformado)');
     }
@@ -46,12 +58,22 @@ function loadServiceAccountCredentials(): Record<string, unknown> {
     if (!fs.existsSync(resolved)) {
       throw new Error(`Arquivo de service account não encontrado: ${resolved}`);
     }
-    return JSON.parse(fs.readFileSync(resolved, 'utf8'));
+    return normalizeServiceAccount(JSON.parse(fs.readFileSync(resolved, 'utf8')));
   }
 
   throw new Error(
-    'Service account não configurada. Defina GOOGLE_SERVICE_ACCOUNT_JSON ou GOOGLE_APPLICATION_CREDENTIALS.'
+    'Service account não configurada. Defina GOOGLE_SERVICE_ACCOUNT_JSON no Vercel (arquivo JSON local não funciona em produção).'
   );
+}
+
+/** Diagnóstico sem vazar segredos — útil no deploy */
+export function getDriveEnvStatus() {
+  return {
+    hasServiceAccountJson: Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim()),
+    hasCredentialsFile: Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim()),
+    hasDriveFolderId: Boolean(process.env.DRIVE_FOLDER_ID?.trim()),
+    driveFolderIdPrefix: process.env.DRIVE_FOLDER_ID?.trim().slice(0, 6) || null,
+  };
 }
 
 export function getGoogleAuth() {

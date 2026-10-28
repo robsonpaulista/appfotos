@@ -66,3 +66,7 @@ fotosteste/
 !LICENSE
 !.gitignore
 !vercel.json
+# Service account (nunca versionar)
+jarchive-*.json
+*-service-account*.json
+service-account-key.json

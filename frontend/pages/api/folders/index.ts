@@ -1,10 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { requireAuth } from '../../../lib/api-server/auth';
-import { getDriveClient, getDriveFolderId } from '../../../lib/api-server/google.config';
+import {
+  getDriveClient,
+  getDriveEnvStatus,
+  getDriveFolderId,
+} from '../../../lib/api-server/google.config';
 
 /**
  * GET /api/folders
  * Lista pastas sob DRIVE_FOLDER_ID (service account)
+ * ?diagnose=1 → só status das env vars (sem segredos)
  */
 export default async function handler(
   req: NextApiRequest,
@@ -18,6 +23,26 @@ export default async function handler(
     const auth = await requireAuth(req);
     if (!auth) {
       return res.status(401).json({ error: 'Não autenticado' });
+    }
+
+    if (req.query.diagnose === '1') {
+      return res.json({ ok: true, env: getDriveEnvStatus() });
+    }
+
+    const env = getDriveEnvStatus();
+    if (!env.hasServiceAccountJson && !env.hasCredentialsFile) {
+      return res.status(500).json({
+        error:
+          'GOOGLE_SERVICE_ACCOUNT_JSON não está definida no Vercel. Cole o JSON da service account e faça Redeploy.',
+        env,
+      });
+    }
+    if (!env.hasDriveFolderId) {
+      return res.status(500).json({
+        error:
+          'DRIVE_FOLDER_ID não está definida no Vercel. Use o ID da pasta raiz compartilhada com a service account.',
+        env,
+      });
     }
 
     const drive = await getDriveClient();
@@ -39,7 +64,17 @@ export default async function handler(
       return all;
     }
 
-    const subIds = await collectSubfolders(rootFolderId);
+    let subIds: string[];
+    try {
+      subIds = await collectSubfolders(rootFolderId);
+    } catch (listError) {
+      const msg = listError instanceof Error ? listError.message : String(listError);
+      return res.status(500).json({
+        error: `Drive recusou listar pastas (compartilhe a pasta com jarchive@…iam.gserviceaccount.com): ${msg}`,
+        env,
+      });
+    }
+
     const allIds = [rootFolderId, ...subIds];
 
     const folders: Array<{
@@ -64,8 +99,14 @@ export default async function handler(
           createdTime: info.data.createdTime,
           modifiedTime: info.data.modifiedTime
         });
-      } catch {
-        // ignore
+      } catch (getError) {
+        if (folderId === rootFolderId) {
+          const msg = getError instanceof Error ? getError.message : String(getError);
+          return res.status(500).json({
+            error: `Não foi possível ler a pasta raiz DRIVE_FOLDER_ID. Confira o ID e o compartilhamento com a service account. (${msg})`,
+            env,
+          });
+        }
       }
     }
 
@@ -111,6 +152,8 @@ export default async function handler(
     });
   } catch (error) {
     console.error('Erro ao listar pastas:', error);
-    res.status(500).json({ error: 'Falha ao listar pastas' });
+    const message =
+      error instanceof Error ? error.message : 'Falha ao listar pastas';
+    res.status(500).json({ error: message, env: getDriveEnvStatus() });
   }
 }

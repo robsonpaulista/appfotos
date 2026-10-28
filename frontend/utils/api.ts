@@ -24,14 +24,21 @@ function getBaseUrl(): string {
 
 /**
  * Express (Face-API / lideranças).
- * Em rede local: usa o mesmo host da página (ex.: celular em http://192.168.x.x:3000
- * → API em http://192.168.x.x:4000). Em localhost, usa NEXT_PUBLIC_BACKEND_URL.
+ * - localhost → NEXT_PUBLIC_BACKEND_URL ou :4000
+ * - IP na LAN → mesmo host :4000
+ * - Vercel/domínio → NEXT_PUBLIC_BACKEND_URL (backend hospedado); senão vazio
  */
 function getExpressBaseUrl(): string {
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
-    if (host && host !== 'localhost' && host !== '127.0.0.1') {
+    const isLocalhost = host === 'localhost' || host === '127.0.0.1';
+    const isLanIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+
+    if (isLanIp) {
       return `${window.location.protocol}//${host}:4000`;
+    }
+    if (!isLocalhost) {
+      return process.env.NEXT_PUBLIC_BACKEND_URL || '';
     }
   }
   return process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';

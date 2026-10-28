@@ -17,6 +17,7 @@ interface FolderSelectorProps {
 export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelectorProps) {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<Folder | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   
@@ -34,10 +35,35 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
   const loadFolders = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const response = await api.getFolders();
       setFolders(response.tree || []);
-    } catch (error) {
+      if (!(response.tree || []).length) {
+        setLoadError(
+          'Nenhuma pasta retornada. Em produção, confira DRIVE_FOLDER_ID e GOOGLE_SERVICE_ACCOUNT_JSON no Vercel (o arquivo JSON local não sobe no deploy).'
+        );
+      }
+    } catch (error: unknown) {
       console.error('Erro ao carregar pastas:', error);
+      const ax = error as { response?: { data?: { error?: string }; status?: number } };
+      const apiError = ax.response?.data?.error;
+      const envHint = ax.response?.data as
+        | { env?: { hasServiceAccountJson?: boolean; hasDriveFolderId?: boolean } }
+        | undefined;
+      let hint = '';
+      if (envHint?.env) {
+        const missing: string[] = [];
+        if (!envHint.env.hasServiceAccountJson) missing.push('GOOGLE_SERVICE_ACCOUNT_JSON');
+        if (!envHint.env.hasDriveFolderId) missing.push('DRIVE_FOLDER_ID');
+        if (missing.length) hint = ` Faltando no Vercel: ${missing.join(', ')}.`;
+      }
+      setLoadError(
+        (apiError ||
+          (ax.response?.status === 401
+            ? 'Sessão expirada. Faça login de novo.'
+            : 'Falha ao listar pastas do Drive. Verifique a service account no Vercel.')) + hint
+      );
+      setFolders([]);
     } finally {
       setLoading(false);
     }
@@ -162,11 +188,23 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
               <p className="text-slate-600">Carregando pastas...</p>
             </div>
           ) : folders.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+            <div className="flex flex-col items-center justify-center py-12 text-slate-500 px-4 text-center">
               <svg className="w-16 h-16 mb-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
               </svg>
               <p className="text-lg font-medium">Nenhuma pasta encontrada</p>
+              {loadError && (
+                <p className="mt-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 max-w-md">
+                  {loadError}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={loadFolders}
+                className="mt-4 text-sm font-medium text-slate-700 underline hover:no-underline"
+              >
+                Tentar de novo
+              </button>
             </div>
           ) : (
             <div className="space-y-1">

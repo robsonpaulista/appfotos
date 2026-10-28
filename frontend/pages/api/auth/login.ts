@@ -26,6 +26,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       String(password)
     );
 
+    if (!process.env.SUPABASE_SERVICE_KEY && process.env.VERCEL) {
+      console.error('SUPABASE_SERVICE_KEY ausente no Vercel — login/perfil podem falhar');
+    }
+
     const { data: profile, error: profileError } = await supabase
       .from('app_users')
       .select('id, email, name, role')
@@ -34,8 +38,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (profileError || !profile) {
       clearAuthCookies(res);
+      console.error('Login Auth OK, mas sem app_users:', data.user.id, data.user.email, profileError?.message);
       return res.status(403).json({
-        error: 'Usuário sem perfil no app. Peça a um administrador para liberar o acesso.'
+        error:
+          'Usuário autenticado, mas sem perfil em app_users. No Supabase SQL, vincule o UUID do Auth à tabela app_users (role admin/viewer).'
       });
     }
 
