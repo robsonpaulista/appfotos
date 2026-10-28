@@ -4,7 +4,17 @@ import {
   getDriveClient,
   getDriveEnvStatus,
   getDriveFolderId,
+  getServiceAccessToken,
 } from '../../../lib/api-server/google.config';
+
+type FolderNode = {
+  id: string;
+  name: string;
+  parents: string[];
+  createdTime?: string | null;
+  modifiedTime?: string | null;
+  children: FolderNode[];
+};
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -25,7 +35,7 @@ function toErrorMessage(error: unknown): string {
 /**
  * GET /api/folders
  * Lista pastas sob DRIVE_FOLDER_ID (service account)
- * ?diagnose=1 → só status das env vars (sem segredos)
+ * ?diagnose=1 → status das env vars + teste de token (sem listar árvore)
  */
 export default async function handler(
   req: NextApiRequest,
@@ -41,11 +51,35 @@ export default async function handler(
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
+    const env = getDriveEnvStatus();
+
     if (req.query.diagnose === '1') {
-      return res.json({ ok: true, env: getDriveEnvStatus() });
+      const diagnose: Record<string, unknown> = { ok: true, env };
+      try {
+        if (!env.hasServiceAccountJson && !env.hasCredentialsFile) {
+          diagnose.token = 'skipped';
+          diagnose.error = 'Sem credencial de service account';
+        } else {
+          await getServiceAccessToken();
+          diagnose.token = 'ok';
+          if (env.hasDriveFolderId) {
+            const drive = await getDriveClient();
+            const root = await drive.files.get({
+              fileId: getDriveFolderId(),
+              fields: 'id, name',
+              supportsAllDrives: true,
+            });
+            diagnose.root = { id: root.data.id, name: root.data.name };
+          }
+        }
+      } catch (diagError) {
+        diagnose.ok = false;
+        diagnose.token = 'fail';
+        diagnose.error = toErrorMessage(diagError);
+      }
+      return res.json(diagnose);
     }
 
-    const env = getDriveEnvStatus();
     if (!env.hasServiceAccountJson && !env.hasCredentialsFile) {
       return res.status(500).json({
         error:
@@ -61,110 +95,131 @@ export default async function handler(
       });
     }
 
-    const drive = await getDriveClient();
-    const rootFolderId = getDriveFolderId();
-
-    async function collectSubfolders(folderId: string): Promise<string[]> {
-      const response = await drive.files.list({
-        q: `'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-        fields: 'files(id)',
-        pageSize: 100,
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true
-      });
-      const ids = (response.data.files || []).map(f => f.id!).filter(Boolean);
-      let all = [...ids];
-      for (const id of ids) {
-        all = all.concat(await collectSubfolders(id));
-      }
-      return all;
-    }
-
-    let subIds: string[];
+    let drive;
     try {
-      subIds = await collectSubfolders(rootFolderId);
-    } catch (listError) {
-      const msg = toErrorMessage(listError);
+      drive = await getDriveClient();
+    } catch (credError) {
       return res.status(500).json({
-        error: `Drive recusou listar pastas (compartilhe a pasta com jarchive@…iam.gserviceaccount.com): ${msg}`,
+        error: `Falha ao autenticar a service account: ${toErrorMessage(credError)}`,
         env,
       });
     }
 
-    const allIds = [rootFolderId, ...subIds];
+    const rootFolderId = getDriveFolderId();
 
+    let rootMeta: { id: string; name: string; parents: string[] };
+    try {
+      const rootInfo = await drive.files.get({
+        fileId: rootFolderId,
+        fields: 'id, name, parents, createdTime, modifiedTime',
+        supportsAllDrives: true,
+      });
+      rootMeta = {
+        id: rootInfo.data.id!,
+        name: rootInfo.data.name || 'Raiz',
+        parents: rootInfo.data.parents || [],
+      };
+    } catch (getError) {
+      return res.status(500).json({
+        error: `Não foi possível ler a pasta raiz DRIVE_FOLDER_ID. Confira o ID e o compartilhamento com a service account. (${toErrorMessage(getError)})`,
+        env,
+      });
+    }
+
+    // BFS: um files.list por pasta, já com name/parents (sem N files.get)
     const folders: Array<{
       id: string;
-      name: string | null | undefined;
+      name: string;
       parents: string[];
       createdTime?: string | null;
       modifiedTime?: string | null;
-    }> = [];
+    }> = [
+      {
+        id: rootMeta.id,
+        name: rootMeta.name,
+        parents: rootMeta.parents,
+      },
+    ];
 
-    for (const folderId of allIds) {
-      try {
-        const info = await drive.files.get({
-          fileId: folderId,
-          fields: 'id, name, parents, createdTime, modifiedTime',
-          supportsAllDrives: true
-        });
-        folders.push({
-          id: info.data.id!,
-          name: info.data.name,
-          parents: info.data.parents || [],
-          createdTime: info.data.createdTime,
-          modifiedTime: info.data.modifiedTime
-        });
-      } catch (getError) {
-        if (folderId === rootFolderId) {
-          const msg = toErrorMessage(getError);
-          return res.status(500).json({
-            error: `Não foi possível ler a pasta raiz DRIVE_FOLDER_ID. Confira o ID e o compartilhamento com a service account. (${msg})`,
-            env,
+    const queue: string[] = [rootFolderId];
+    const seen = new Set<string>([rootFolderId]);
+    const maxFolders = 500;
+
+    try {
+      while (queue.length > 0 && folders.length < maxFolders) {
+        const folderId = queue.shift()!;
+        let pageToken: string | undefined;
+
+        do {
+          const response = await drive.files.list({
+            q: `'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+            fields:
+              'nextPageToken, files(id, name, parents, createdTime, modifiedTime)',
+            pageSize: 100,
+            pageToken,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
           });
-        }
+
+          for (const file of response.data.files || []) {
+            if (!file.id || seen.has(file.id)) continue;
+            seen.add(file.id);
+            folders.push({
+              id: file.id,
+              name: file.name || 'Sem nome',
+              parents: file.parents || [],
+              createdTime: file.createdTime,
+              modifiedTime: file.modifiedTime,
+            });
+            queue.push(file.id);
+            if (folders.length >= maxFolders) break;
+          }
+
+          pageToken = response.data.nextPageToken || undefined;
+        } while (pageToken && folders.length < maxFolders);
       }
+    } catch (listError) {
+      return res.status(500).json({
+        error: `Drive recusou listar pastas (compartilhe a pasta com jarchive@…iam.gserviceaccount.com): ${toErrorMessage(listError)}`,
+        env,
+      });
     }
 
-    const folderMap = new Map<string, {
-      id: string;
-      name: string | null | undefined;
-      parents: string[];
-      children: unknown[];
-    }>();
-    const rootFolders: unknown[] = [];
+    const folderMap = new Map<string, FolderNode>();
+    const rootFolders: FolderNode[] = [];
 
-    folders.forEach(folder => {
+    for (const folder of folders) {
       folderMap.set(folder.id, {
         id: folder.id,
         name: folder.name,
-        parents: folder.parents || [],
-        children: []
+        parents: folder.parents,
+        createdTime: folder.createdTime,
+        modifiedTime: folder.modifiedTime,
+        children: [],
       });
-    });
+    }
 
-    folders.forEach(folder => {
-      const folderData = folderMap.get(folder.id);
-      if (!folderData) return;
-      if (folderData.parents.length === 0 || folder.id === rootFolderId) {
-        if (!rootFolders.includes(folderData)) {
-          rootFolders.push(folderData);
-        }
-      } else {
-        const parent = folderMap.get(folderData.parents[0]);
-        if (parent) {
-          parent.children.push(folderData);
-        } else {
-          rootFolders.push(folderData);
-        }
+    for (const folder of folders) {
+      const node = folderMap.get(folder.id);
+      if (!node) continue;
+      if (folder.id === rootFolderId) {
+        rootFolders.push(node);
+        continue;
       }
-    });
+      const parentId = folder.parents[0];
+      const parent = parentId ? folderMap.get(parentId) : undefined;
+      if (parent) {
+        parent.children.push(node);
+      } else {
+        rootFolders.push(node);
+      }
+    }
 
     res.json({
       folders,
       tree: rootFolders,
       total: folders.length,
-      rootFolderId
+      rootFolderId,
     });
   } catch (error) {
     console.error('Erro ao listar pastas:', error);
