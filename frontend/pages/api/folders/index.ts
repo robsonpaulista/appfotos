@@ -6,6 +6,22 @@ import {
   getDriveFolderId,
 } from '../../../lib/api-server/google.config';
 
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const withResponse = error as Error & {
+      response?: { data?: { error?: { message?: string } | string } };
+    };
+    const nested = withResponse.response?.data?.error;
+    if (typeof nested === 'string' && nested.trim()) return nested;
+    if (nested && typeof nested === 'object' && typeof nested.message === 'string') {
+      return nested.message;
+    }
+    return error.message || 'Falha ao listar pastas';
+  }
+  if (typeof error === 'string') return error;
+  return 'Falha ao listar pastas';
+}
+
 /**
  * GET /api/folders
  * Lista pastas sob DRIVE_FOLDER_ID (service account)
@@ -68,7 +84,7 @@ export default async function handler(
     try {
       subIds = await collectSubfolders(rootFolderId);
     } catch (listError) {
-      const msg = listError instanceof Error ? listError.message : String(listError);
+      const msg = toErrorMessage(listError);
       return res.status(500).json({
         error: `Drive recusou listar pastas (compartilhe a pasta com jarchive@…iam.gserviceaccount.com): ${msg}`,
         env,
@@ -101,7 +117,7 @@ export default async function handler(
         });
       } catch (getError) {
         if (folderId === rootFolderId) {
-          const msg = getError instanceof Error ? getError.message : String(getError);
+          const msg = toErrorMessage(getError);
           return res.status(500).json({
             error: `Não foi possível ler a pasta raiz DRIVE_FOLDER_ID. Confira o ID e o compartilhamento com a service account. (${msg})`,
             env,
@@ -152,8 +168,6 @@ export default async function handler(
     });
   } catch (error) {
     console.error('Erro ao listar pastas:', error);
-    const message =
-      error instanceof Error ? error.message : 'Falha ao listar pastas';
-    res.status(500).json({ error: message, env: getDriveEnvStatus() });
+    res.status(500).json({ error: toErrorMessage(error), env: getDriveEnvStatus() });
   }
 }

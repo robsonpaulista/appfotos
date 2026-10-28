@@ -14,6 +14,21 @@ interface FolderSelectorProps {
   onSelectFolder: (folderId: string, folderName: string, tags?: { person?: string; location?: string; event?: string }) => void;
 }
 
+function formatDriveError(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.message === 'string' && obj.message.trim()) return obj.message;
+    if (obj.error !== undefined) return formatDriveError(obj.error, fallback);
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
 export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelectorProps) {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(false);
@@ -45,24 +60,31 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
       }
     } catch (error: unknown) {
       console.error('Erro ao carregar pastas:', error);
-      const ax = error as { response?: { data?: { error?: string }; status?: number } };
-      const apiError = ax.response?.data?.error;
-      const envHint = ax.response?.data as
-        | { env?: { hasServiceAccountJson?: boolean; hasDriveFolderId?: boolean } }
-        | undefined;
+      const ax = error as {
+        response?: {
+          data?: {
+            error?: unknown;
+            env?: { hasServiceAccountJson?: boolean; hasDriveFolderId?: boolean };
+          };
+          status?: number;
+        };
+        message?: string;
+      };
+      const data = ax.response?.data;
+      const message = formatDriveError(
+        data?.error,
+        ax.response?.status === 401
+          ? 'Sessão expirada. Faça login de novo.'
+          : ax.message || 'Falha ao listar pastas do Drive. Verifique a service account no Vercel.'
+      );
       let hint = '';
-      if (envHint?.env) {
+      if (data?.env) {
         const missing: string[] = [];
-        if (!envHint.env.hasServiceAccountJson) missing.push('GOOGLE_SERVICE_ACCOUNT_JSON');
-        if (!envHint.env.hasDriveFolderId) missing.push('DRIVE_FOLDER_ID');
+        if (!data.env.hasServiceAccountJson) missing.push('GOOGLE_SERVICE_ACCOUNT_JSON');
+        if (!data.env.hasDriveFolderId) missing.push('DRIVE_FOLDER_ID');
         if (missing.length) hint = ` Faltando no Vercel: ${missing.join(', ')}.`;
       }
-      setLoadError(
-        (apiError ||
-          (ax.response?.status === 401
-            ? 'Sessão expirada. Faça login de novo.'
-            : 'Falha ao listar pastas do Drive. Verifique a service account no Vercel.')) + hint
-      );
+      setLoadError(message + hint);
       setFolders([]);
     } finally {
       setLoading(false);
