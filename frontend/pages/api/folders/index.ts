@@ -6,6 +6,7 @@ import {
   getDriveFolderId,
   getServiceAccessToken,
 } from '../../../lib/api-server/google.config';
+import type { drive_v3 } from 'googleapis';
 
 type FolderNode = {
   id: string;
@@ -14,6 +15,8 @@ type FolderNode = {
   createdTime?: string | null;
   modifiedTime?: string | null;
   children: FolderNode[];
+  childrenLoaded: boolean;
+  mayHaveChildren: boolean;
 };
 
 function toErrorMessage(error: unknown): string {
@@ -32,10 +35,49 @@ function toErrorMessage(error: unknown): string {
   return 'Falha ao listar pastas';
 }
 
+async function listChildFolders(
+  drive: drive_v3.Drive,
+  parentId: string
+): Promise<FolderNode[]> {
+  const children: FolderNode[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const response = await drive.files.list({
+      q: `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      fields: 'nextPageToken, files(id, name, parents, createdTime, modifiedTime)',
+      pageSize: 100,
+      pageToken,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    for (const file of response.data.files || []) {
+      if (!file.id) continue;
+      children.push({
+        id: file.id,
+        name: file.name || 'Sem nome',
+        parents: file.parents || [parentId],
+        createdTime: file.createdTime,
+        modifiedTime: file.modifiedTime,
+        children: [],
+        childrenLoaded: false,
+        // assume que pode ter subpastas até carregar
+        mayHaveChildren: true,
+      });
+    }
+
+    pageToken = response.data.nextPageToken || undefined;
+  } while (pageToken);
+
+  return children;
+}
+
 /**
  * GET /api/folders
- * Lista pastas sob DRIVE_FOLDER_ID (service account)
- * ?diagnose=1 → status das env vars + teste de token (sem listar árvore)
+ * - sem params: raiz + 1 nível (rápido no Vercel)
+ * - ?parentId=ID: só filhos diretos (lazy load)
+ * - ?diagnose=1: status env + token + pasta raiz
  */
 export default async function handler(
   req: NextApiRequest,
@@ -95,7 +137,7 @@ export default async function handler(
       });
     }
 
-    let drive;
+    let drive: drive_v3.Drive;
     try {
       drive = await getDriveClient();
     } catch (credError) {
@@ -106,7 +148,30 @@ export default async function handler(
     }
 
     const rootFolderId = getDriveFolderId();
+    const parentId =
+      typeof req.query.parentId === 'string' && req.query.parentId.trim()
+        ? req.query.parentId.trim()
+        : null;
 
+    // Lazy: filhos de uma pasta específica
+    if (parentId) {
+      try {
+        const children = await listChildFolders(drive, parentId);
+        return res.json({
+          parentId,
+          folders: children,
+          tree: children,
+          total: children.length,
+        });
+      } catch (listError) {
+        return res.status(500).json({
+          error: `Drive recusou listar subpastas: ${toErrorMessage(listError)}`,
+          env,
+        });
+      }
+    }
+
+    // Carga inicial: só raiz + filhos diretos (cabe no limite de 10s do Vercel)
     let rootMeta: { id: string; name: string; parents: string[] };
     try {
       const rootInfo = await drive.files.get({
@@ -126,58 +191,9 @@ export default async function handler(
       });
     }
 
-    // BFS: um files.list por pasta, já com name/parents (sem N files.get)
-    const folders: Array<{
-      id: string;
-      name: string;
-      parents: string[];
-      createdTime?: string | null;
-      modifiedTime?: string | null;
-    }> = [
-      {
-        id: rootMeta.id,
-        name: rootMeta.name,
-        parents: rootMeta.parents,
-      },
-    ];
-
-    const queue: string[] = [rootFolderId];
-    const seen = new Set<string>([rootFolderId]);
-    const maxFolders = 500;
-
+    let children: FolderNode[];
     try {
-      while (queue.length > 0 && folders.length < maxFolders) {
-        const folderId = queue.shift()!;
-        let pageToken: string | undefined;
-
-        do {
-          const response = await drive.files.list({
-            q: `'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-            fields:
-              'nextPageToken, files(id, name, parents, createdTime, modifiedTime)',
-            pageSize: 100,
-            pageToken,
-            supportsAllDrives: true,
-            includeItemsFromAllDrives: true,
-          });
-
-          for (const file of response.data.files || []) {
-            if (!file.id || seen.has(file.id)) continue;
-            seen.add(file.id);
-            folders.push({
-              id: file.id,
-              name: file.name || 'Sem nome',
-              parents: file.parents || [],
-              createdTime: file.createdTime,
-              modifiedTime: file.modifiedTime,
-            });
-            queue.push(file.id);
-            if (folders.length >= maxFolders) break;
-          }
-
-          pageToken = response.data.nextPageToken || undefined;
-        } while (pageToken && folders.length < maxFolders);
-      }
+      children = await listChildFolders(drive, rootFolderId);
     } catch (listError) {
       return res.status(500).json({
         error: `Drive recusou listar pastas (compartilhe a pasta com jarchive@…iam.gserviceaccount.com): ${toErrorMessage(listError)}`,
@@ -185,40 +201,19 @@ export default async function handler(
       });
     }
 
-    const folderMap = new Map<string, FolderNode>();
-    const rootFolders: FolderNode[] = [];
-
-    for (const folder of folders) {
-      folderMap.set(folder.id, {
-        id: folder.id,
-        name: folder.name,
-        parents: folder.parents,
-        createdTime: folder.createdTime,
-        modifiedTime: folder.modifiedTime,
-        children: [],
-      });
-    }
-
-    for (const folder of folders) {
-      const node = folderMap.get(folder.id);
-      if (!node) continue;
-      if (folder.id === rootFolderId) {
-        rootFolders.push(node);
-        continue;
-      }
-      const parentId = folder.parents[0];
-      const parent = parentId ? folderMap.get(parentId) : undefined;
-      if (parent) {
-        parent.children.push(node);
-      } else {
-        rootFolders.push(node);
-      }
-    }
+    const rootNode: FolderNode = {
+      id: rootMeta.id,
+      name: rootMeta.name,
+      parents: rootMeta.parents,
+      children,
+      childrenLoaded: true,
+      mayHaveChildren: children.length > 0,
+    };
 
     res.json({
-      folders,
-      tree: rootFolders,
-      total: folders.length,
+      folders: [rootNode, ...children],
+      tree: [rootNode],
+      total: 1 + children.length,
       rootFolderId,
     });
   } catch (error) {

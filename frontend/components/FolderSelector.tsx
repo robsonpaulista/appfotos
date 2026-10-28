@@ -6,6 +6,8 @@ interface Folder {
   name: string;
   parents?: string[];
   children?: Folder[];
+  childrenLoaded?: boolean;
+  mayHaveChildren?: boolean;
 }
 
 interface FolderSelectorProps {
@@ -35,6 +37,7 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<Folder | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [loadingChildrenId, setLoadingChildrenId] = useState<string | null>(null);
   
   // Tags para aplicar nas fotos importadas
   const [personTag, setPersonTag] = useState('');
@@ -47,58 +50,119 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
     }
   }, [isOpen]);
 
+  const parseFoldersError = (error: unknown): string => {
+    const ax = error as {
+      response?: {
+        data?: {
+          error?: unknown;
+          env?: { hasServiceAccountJson?: boolean; hasDriveFolderId?: boolean };
+        };
+        status?: number;
+      };
+      message?: string;
+    };
+    const data = ax.response?.data;
+    const message = formatDriveError(
+      data?.error,
+      ax.response?.status === 401
+        ? 'Sessão expirada. Faça login de novo.'
+        : ax.message || 'Falha ao listar pastas do Drive. Verifique a service account no Vercel.'
+    );
+    let hint = '';
+    if (data?.env) {
+      const missing: string[] = [];
+      if (!data.env.hasServiceAccountJson) missing.push('GOOGLE_SERVICE_ACCOUNT_JSON');
+      if (!data.env.hasDriveFolderId) missing.push('DRIVE_FOLDER_ID');
+      if (missing.length) hint = ` Faltando no Vercel: ${missing.join(', ')}.`;
+    }
+    return message + hint;
+  };
+
+  const updateFolderChildren = (
+    nodes: Folder[],
+    folderId: string,
+    children: Folder[]
+  ): Folder[] =>
+    nodes.map((node) => {
+      if (node.id === folderId) {
+        return {
+          ...node,
+          children,
+          childrenLoaded: true,
+          mayHaveChildren: children.length > 0,
+        };
+      }
+      if (node.children?.length) {
+        return {
+          ...node,
+          children: updateFolderChildren(node.children, folderId, children),
+        };
+      }
+      return node;
+    });
+
   const loadFolders = async () => {
     try {
       setLoading(true);
       setLoadError(null);
       const response = await api.getFolders();
-      setFolders(response.tree || []);
-      if (!(response.tree || []).length) {
+      const tree = (response.tree || []) as Folder[];
+      setFolders(tree);
+      if (tree[0]?.id) {
+        setExpandedFolders(new Set([tree[0].id]));
+      }
+      if (!tree.length) {
         setLoadError(
           'Nenhuma pasta retornada. Em produção, confira DRIVE_FOLDER_ID e GOOGLE_SERVICE_ACCOUNT_JSON no Vercel (o arquivo JSON local não sobe no deploy).'
         );
       }
     } catch (error: unknown) {
       console.error('Erro ao carregar pastas:', error);
-      const ax = error as {
-        response?: {
-          data?: {
-            error?: unknown;
-            env?: { hasServiceAccountJson?: boolean; hasDriveFolderId?: boolean };
-          };
-          status?: number;
-        };
-        message?: string;
-      };
-      const data = ax.response?.data;
-      const message = formatDriveError(
-        data?.error,
-        ax.response?.status === 401
-          ? 'Sessão expirada. Faça login de novo.'
-          : ax.message || 'Falha ao listar pastas do Drive. Verifique a service account no Vercel.'
-      );
-      let hint = '';
-      if (data?.env) {
-        const missing: string[] = [];
-        if (!data.env.hasServiceAccountJson) missing.push('GOOGLE_SERVICE_ACCOUNT_JSON');
-        if (!data.env.hasDriveFolderId) missing.push('DRIVE_FOLDER_ID');
-        if (missing.length) hint = ` Faltando no Vercel: ${missing.join(', ')}.`;
-      }
-      setLoadError(message + hint);
+      setLoadError(parseFoldersError(error));
       setFolders([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleFolder = (folderId: string) => {
+  const toggleFolder = async (folderId: string) => {
     const newExpanded = new Set(expandedFolders);
     if (newExpanded.has(folderId)) {
       newExpanded.delete(folderId);
-    } else {
-      newExpanded.add(folderId);
+      setExpandedFolders(newExpanded);
+      return;
     }
+
+    newExpanded.add(folderId);
     setExpandedFolders(newExpanded);
+
+    const findFolder = (nodes: Folder[]): Folder | null => {
+      for (const node of nodes) {
+        if (node.id === folderId) return node;
+        if (node.children?.length) {
+          const found = findFolder(node.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    const folder = findFolder(folders);
+    if (!folder || folder.childrenLoaded) return;
+
+    try {
+      setLoadingChildrenId(folderId);
+      const response = await api.getFolders(folderId);
+      const children = (response.tree || response.folders || []) as Folder[];
+      setFolders((prev) => updateFolderChildren(prev, folderId, children));
+    } catch (error: unknown) {
+      console.error('Erro ao carregar subpastas:', error);
+      setLoadError(parseFoldersError(error));
+      newExpanded.delete(folderId);
+      setExpandedFolders(new Set(newExpanded));
+    } finally {
+      setLoadingChildrenId(null);
+    }
   };
 
   const handleSelectFolder = () => {
@@ -121,9 +185,12 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
   };
 
   const renderFolder = (folder: Folder, level: number = 0) => {
-    const hasChildren = folder.children && folder.children.length > 0;
+    const canExpand =
+      folder.mayHaveChildren !== false &&
+      (!folder.childrenLoaded || (folder.children?.length ?? 0) > 0);
     const isExpanded = expandedFolders.has(folder.id);
     const isSelected = selectedFolder?.id === folder.id;
+    const isLoadingChildren = loadingChildrenId === folder.id;
 
     return (
       <div key={folder.id} className="select-none">
@@ -136,15 +203,18 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
           style={{ marginLeft: `${level * 20}px` }}
           onClick={() => setSelectedFolder(folder)}
         >
-          {hasChildren && (
+          {canExpand ? (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                toggleFolder(folder.id);
+                void toggleFolder(folder.id);
               }}
               className="p-1 hover:bg-slate-200 rounded"
+              aria-label={isExpanded ? 'Recolher' : 'Expandir'}
             >
-              {isExpanded ? (
+              {isLoadingChildren ? (
+                <span className="block w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+              ) : isExpanded ? (
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
@@ -154,9 +224,9 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
                 </svg>
               )}
             </button>
+          ) : (
+            <div className="w-6" />
           )}
-          
-          {!hasChildren && <div className="w-6" />}
           
           <svg className="w-5 h-5 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
             <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
@@ -171,9 +241,9 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
           )}
         </div>
 
-        {hasChildren && isExpanded && (
+        {canExpand && isExpanded && (
           <div>
-            {folder.children!.map((child) => renderFolder(child, level + 1))}
+            {(folder.children || []).map((child) => renderFolder(child, level + 1))}
           </div>
         )}
       </div>

@@ -142,8 +142,23 @@ class ApiClient {
   }
 
   // Folder endpoints
-  async getFolders(): Promise<any> {
-    const { data } = await this.client.get('/api/folders');
+  async getFolders(parentId?: string): Promise<{
+    tree: Array<{
+      id: string;
+      name: string;
+      parents?: string[];
+      children?: unknown[];
+      childrenLoaded?: boolean;
+      mayHaveChildren?: boolean;
+    }>;
+    folders?: unknown[];
+    total?: number;
+    rootFolderId?: string;
+    parentId?: string;
+  }> {
+    const { data } = await this.client.get('/api/folders', {
+      params: parentId ? { parentId } : undefined,
+    });
     return data;
   }
 
