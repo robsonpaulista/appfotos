@@ -1,17 +1,178 @@
 import express from 'express';
+import multer from 'multer';
 import faceRecognitionService from '../services/faceRecognition.service.js';
 import driveService from '../services/drive.service.js';
 import { supabase } from '../config/supabase.config.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { getLibrarySourceId } from '../config/google.config.js';
 
 const router = express.Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
 
-// Middleware para verificar autenticação
-const requireAuth = async (req, res, next) => {
-  if (!req.session.userId) {
-    return res.status(401).json({ error: 'Não autenticado' });
+/**
+ * POST /api/faces/search-by-image
+ * Upload/selfie → detecta rosto → busca no acervo
+ */
+router.post('/search-by-image', requireAuth, upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Envie uma imagem no campo image' });
+    }
+
+    // Distância euclidiana Face-API: quanto menor, mais parecido.
+    // 0.5 ≈ bom equilíbrio (0.7 mistura pessoas; 0.4 é bem restrito).
+    const threshold = req.body?.threshold
+      ? parseFloat(req.body.threshold)
+      : 0.5;
+
+    const result = await faceRecognitionService.searchByImageBuffer(
+      req.file.buffer,
+      req.file.mimetype,
+      Number.isFinite(threshold) ? threshold : 0.5,
+      getLibrarySourceId()
+    );
+
+    if (result.error === 'no_face') {
+      return res.status(400).json(result);
+    }
+
+    if (result.indexedFaces === 0) {
+      return res.json({
+        ...result,
+        message: 'Nenhum rosto indexado no acervo ainda. Peça a um admin para indexar as fotos.'
+      });
+    }
+
+    if (result.matches.length === 0) {
+      return res.json({
+        ...result,
+        message: 'Nenhuma foto correspondente encontrada no acervo.'
+      });
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Erro em search-by-image:', error);
+    res.status(500).json({ error: 'Falha na busca por imagem' });
   }
-  next();
-};
+});
+
+/**
+ * POST /api/faces/search-by-leader
+ * Usa vetor facial da liderança cadastrada
+ */
+router.post('/search-by-leader', requireAuth, async (req, res) => {
+  try {
+    const { leaderId, threshold = 0.5 } = req.body || {};
+    if (!leaderId) {
+      return res.status(400).json({ error: 'leaderId é obrigatório' });
+    }
+
+    const { data: leader, error } = await supabase
+      .from('leaders')
+      .select('id, name, city, role_title, face_vector, photo_data')
+      .eq('id', leaderId)
+      .single();
+
+    if (error || !leader) {
+      return res.status(404).json({ error: 'Liderança não encontrada' });
+    }
+
+    if (!leader.face_vector || leader.face_vector.length === 0) {
+      return res.status(400).json({ error: 'Liderança sem vetor facial. Recadastre com outra foto.' });
+    }
+
+    const result = await faceRecognitionService.searchArchiveByDescriptor(
+      leader.face_vector,
+      threshold,
+      getLibrarySourceId()
+    );
+
+    res.json({
+      leader: {
+        id: leader.id,
+        name: leader.name,
+        city: leader.city,
+        role_title: leader.role_title,
+        photo_data: leader.photo_data
+      },
+      facesDetected: 1,
+      matches: result.matches,
+      indexedFaces: result.indexedFaces,
+      message: result.matches.length === 0
+        ? (result.indexedFaces === 0
+          ? 'Nenhum rosto indexado no acervo ainda.'
+          : 'Nenhuma foto correspondente encontrada no acervo.')
+        : undefined
+    });
+  } catch (error) {
+    console.error('Erro em search-by-leader:', error);
+    res.status(500).json({ error: 'Falha na busca por liderança' });
+  }
+});
+
+/**
+ * POST /api/faces/index-library
+ * Admin: indexa rostos de fotos ainda sem descritores (lote)
+ */
+router.post('/index-library', requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.body?.limit || '30', 10), 100);
+    const libraryId = getLibrarySourceId();
+
+    const { data: photos, error } = await supabase
+      .from('photos')
+      .select('id, drive_id, mime_type')
+      .eq('user_id', libraryId)
+      .limit(limit * 3);
+
+    if (error) throw error;
+
+    const results = [];
+    let processed = 0;
+    let facesTotal = 0;
+
+    for (const photo of photos || []) {
+      if (processed >= limit) break;
+
+      const { count } = await supabase
+        .from('face_descriptors')
+        .select('*', { count: 'exact', head: true })
+        .eq('photo_id', photo.id);
+
+      if ((count || 0) > 0) continue;
+
+      try {
+        const imageBuffer = await driveService.getFileContent(photo.drive_id);
+        const detections = await faceRecognitionService.detectFaces(imageBuffer, photo.mime_type);
+        if (detections.length > 0) {
+          await faceRecognitionService.saveFaceDescriptors(photo.id, detections);
+          facesTotal += detections.length;
+        }
+        results.push({ photoId: photo.id, facesDetected: detections.length });
+        processed++;
+      } catch (err) {
+        console.error(`Erro ao indexar ${photo.id}:`, err.message);
+      }
+    }
+
+    res.json({
+      processed,
+      facesTotal,
+      results,
+      message: processed === 0
+        ? 'Nenhuma foto pendente de indexação neste lote.'
+        : `${processed} foto(s) indexada(s), ${facesTotal} rosto(s).`
+    });
+  } catch (error) {
+    console.error('Erro ao indexar biblioteca:', error);
+    res.status(500).json({ error: 'Falha ao indexar rostos do acervo' });
+  }
+});
+
 
 /**
  * POST /api/faces/analyze/:photoId
@@ -26,7 +187,7 @@ router.post('/analyze/:photoId', requireAuth, async (req, res) => {
       .from('photos')
       .select('id, drive_id, user_id, mime_type')
       .eq('id', photoId)
-      .eq('user_id', req.session.userId)
+      .eq('user_id', getLibrarySourceId())
       .single();
 
     if (photoError || !photo) {
@@ -80,7 +241,7 @@ router.post('/analyze-batch', requireAuth, async (req, res) => {
           .from('photos')
           .select('id, drive_id, mime_type')
           .eq('id', photoId)
-          .eq('user_id', req.session.userId)
+          .eq('user_id', getLibrarySourceId())
           .single();
 
         if (!photo) continue;
@@ -179,7 +340,7 @@ router.post('/find-similar', requireAuth, async (req, res) => {
       .from('photos')
       .select('id, name, thumbnail_url, created_at')
       .in('id', photoIds)
-      .eq('user_id', req.session.userId);
+      .eq('user_id', getLibrarySourceId());
 
     const enrichedMatches = matches.map(match => ({
       ...match,
@@ -212,7 +373,7 @@ router.post('/cluster', requireAuth, async (req, res) => {
           .from('photos')
           .select('id, name, thumbnail_url')
           .in('id', photoIds)
-          .eq('user_id', req.session.userId);
+          .eq('user_id', getLibrarySourceId());
 
         return {
           id: `cluster-${index}`,

@@ -3,6 +3,7 @@ import visionService from './vision.service.js';
 import folderService from './folder.service.js';
 import geocodingService from './geocoding.service.js';
 import { supabase } from '../config/supabase.config.js';
+import { getLibrarySourceId, getDriveFolderId } from '../config/google.config.js';
 import { extractTagsFromFolderName } from '../utils/folderParser.js';
 
 /**
@@ -15,14 +16,16 @@ class IngestService {
 
   /**
    * Sincroniza fotos do Google Drive com o banco de dados
-   * @param {string} userId - ID do usuário
+   * @param {string} adminUserId - ID do admin que iniciou a sync (sync_events)
    * @param {boolean} analyzeWithVision - Se deve usar Vision API
-   * @param {string} folderId - ID da pasta específica (opcional)
+   * @param {string} folderId - ID da pasta específica (opcional; default = DRIVE_FOLDER_ID)
    * @param {Object} manualTags - Tags manuais para aplicar (opcional)
    * @returns {Promise<Object>} Estatísticas da sincronização
    */
-  async syncPhotos(userId, analyzeWithVision = false, folderId = null, manualTags = null) {
-    const syncEvent = await this.createSyncEvent(userId);
+  async syncPhotos(adminUserId, analyzeWithVision = false, folderId = null, manualTags = null) {
+    const libraryId = getLibrarySourceId();
+    const effectiveFolderId = folderId || getDriveFolderId();
+    const syncEvent = await this.createSyncEvent(adminUserId);
     
     try {
       let stats = {
@@ -35,39 +38,38 @@ class IngestService {
       let pageToken = null;
       let hasMore = true;
 
-      // Obter nome da pasta para extrair tags (se tiver folderId)
+      // Obter nome da pasta para extrair tags
       let folderName = null;
-      if (folderId) {
-        try {
-          const folderInfo = await folderService.getFolderInfo(folderId);
-          folderName = folderInfo.name;
-          console.log(`📁 Sincronizando pasta: ${folderName}`);
-          
-          if (manualTags) {
-            console.log(`🏷️  Tags manuais que serão aplicadas:`);
-            if (manualTags.person) console.log(`   👤 Pessoa: ${manualTags.person}`);
-            if (manualTags.location) console.log(`   📍 Local: ${manualTags.location}`);
-            if (manualTags.event) console.log(`   📅 Evento: ${manualTags.event}`);
-          }
-        } catch (error) {
-          console.error('Erro ao obter nome da pasta:', error.message);
+      try {
+        const folderInfo = await folderService.getFolderInfo(effectiveFolderId);
+        folderName = folderInfo.name;
+        console.log(`📁 Sincronizando pasta: ${folderName}`);
+
+        if (manualTags) {
+          console.log(`🏷️  Tags manuais que serão aplicadas:`);
+          if (manualTags.person) console.log(`   👤 Pessoa: ${manualTags.person}`);
+          if (manualTags.location) console.log(`   📍 Local: ${manualTags.location}`);
+          if (manualTags.event) console.log(`   📅 Evento: ${manualTags.event}`);
         }
+      } catch (error) {
+        console.error('Erro ao obter nome da pasta:', error.message);
       }
 
       while (hasMore) {
         try {
-          // Se tiver folderId, buscar da pasta específica, senão buscar tudo
-          const { files, nextPageToken } = folderId 
-            ? await folderService.listPhotosInFolder(folderId, this.batchSize, pageToken)
-            : await driveService.listPhotoFiles(pageToken, this.batchSize);
+          const { files, nextPageToken } = await folderService.listPhotosInFolder(
+            effectiveFolderId,
+            this.batchSize,
+            pageToken
+          );
           
           if (!files || files.length === 0) {
             hasMore = false;
             break;
           }
 
-          // Processar batch de fotos (com nome da pasta para auto-tags e tags manuais)
-          const batchStats = await this.processBatch(files, userId, analyzeWithVision, folderName, manualTags);
+          // Fotos ficam sob libraryId (DRIVE_FOLDER_ID), não sob o admin
+          const batchStats = await this.processBatch(files, libraryId, analyzeWithVision, folderName, manualTags);
           stats.processed += batchStats.processed;
           stats.added += batchStats.added;
           stats.updated += batchStats.updated;
@@ -202,6 +204,7 @@ class IngestService {
       gps_lng: metadata.location?.longitude || null,
       thumbnail_url: file.thumbnailLink,
       user_id: userId,
+      drive_folder_id: getDriveFolderId(),
       analyzed: !!visionAnalysis,
       // Auto-tags extraídas do nome da pasta
       ...autoTags,
@@ -311,11 +314,12 @@ class IngestService {
    * @param {number} limit - Limite de fotos a processar
    * @returns {Promise<Object>} Estatísticas da análise
    */
-  async analyzeUnprocessedPhotos(userId, limit = 100) {
+  async analyzeUnprocessedPhotos(_userId, limit = 100) {
+    const libraryId = getLibrarySourceId();
     const { data: photos, error } = await supabase
       .from('photos')
       .select('id, drive_id')
-      .eq('user_id', userId)
+      .eq('user_id', libraryId)
       .eq('analyzed', false)
       .limit(limit);
 

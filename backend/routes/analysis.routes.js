@@ -2,38 +2,10 @@ import express from 'express';
 import visionService from '../services/vision.service.js';
 import driveService from '../services/drive.service.js';
 import { supabase } from '../config/supabase.config.js';
-import { setCredentials } from '../config/google.config.js';
+import { getLibrarySourceId } from '../config/google.config.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
-
-// Middleware para verificar autenticação
-const requireAuth = async (req, res, next) => {
-  if (!req.session.userId) {
-    return res.status(401).json({ error: 'Não autenticado' });
-  }
-
-  try {
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('access_token, refresh_token, token_expiry')
-      .eq('id', req.session.userId)
-      .single();
-
-    if (error) throw error;
-
-    setCredentials({
-      access_token: user.access_token,
-      refresh_token: user.refresh_token,
-      expiry_date: new Date(user.token_expiry).getTime()
-    });
-
-    req.user = user;
-    next();
-  } catch (error) {
-    console.error('Erro na autenticação:', error);
-    res.status(401).json({ error: 'Sessão inválida' });
-  }
-};
 
 /**
  * POST /api/analysis/reanalyze
@@ -41,7 +13,7 @@ const requireAuth = async (req, res, next) => {
  */
 router.post('/reanalyze', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = getLibrarySourceId();
     const { photoIds, force = false } = req.body;
 
     console.log('🔄 Iniciando re-análise de fotos...');
@@ -152,7 +124,7 @@ router.post('/reanalyze', requireAuth, async (req, res) => {
  */
 router.get('/stats', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = getLibrarySourceId();
 
     // Total de fotos
     const { count: total } = await supabase

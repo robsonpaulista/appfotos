@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { requireAuth } from '../../../lib/api-server/auth';
+import { getLibrarySourceId } from '../../../lib/api-server/google.config';
 import { supabase } from '../../../lib/api-server/supabase.config';
 
 /**
@@ -25,13 +26,17 @@ export default async function handler(
         try {
           const userId = Buffer.from(token, 'base64').toString('utf-8');
           const { data: user } = await supabase
-            .from('users')
-            .select('id')
+            .from('app_users')
+            .select('id, email, name, role')
             .eq('id', userId)
             .single();
           
           if (user) {
-            auth = { userId: user.id, user };
+            auth = {
+              userId: user.id,
+              user: { id: user.id, email: user.email, name: user.name, role: user.role },
+              accessToken: ''
+            };
           }
         } catch {
           // Ignorar erro
@@ -47,7 +52,7 @@ export default async function handler(
     const { count: withGpsCount } = await supabase
       .from('photos')
       .select('*', { count: 'exact', head: true })
-      .eq('user_id', auth.userId)
+      .eq('user_id', getLibrarySourceId())
       .not('gps_lat', 'is', null)
       .not('gps_lng', 'is', null);
 
@@ -55,7 +60,7 @@ export default async function handler(
     const { count: withoutLocationCount } = await supabase
       .from('photos')
       .select('*', { count: 'exact', head: true })
-      .eq('user_id', auth.userId)
+      .eq('user_id', getLibrarySourceId())
       .not('gps_lat', 'is', null)
       .not('gps_lng', 'is', null)
       .is('location_name', null);

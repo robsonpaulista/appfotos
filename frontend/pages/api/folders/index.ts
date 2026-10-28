@@ -1,11 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { requireAuth } from '../../../lib/api-server/auth';
-import { getOAuth2Client } from '../../../lib/api-server/google.config';
-import { google } from 'googleapis';
+import { getDriveClient, getDriveFolderId } from '../../../lib/api-server/google.config';
 
 /**
  * GET /api/folders
- * Lista todas as pastas do Google Drive
+ * Lista pastas sob DRIVE_FOLDER_ID (service account)
  */
 export default async function handler(
   req: NextApiRequest,
@@ -16,35 +15,70 @@ export default async function handler(
   }
 
   try {
-    // Verificar autenticação
     const auth = await requireAuth(req);
     if (!auth) {
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
-    // Configurar Google Drive
-    const oauth2Client = getOAuth2Client();
-    const drive = google.drive({ version: 'v3', auth: oauth2Client });
+    const drive = await getDriveClient();
+    const rootFolderId = getDriveFolderId();
 
-    // Buscar pastas do Google Drive
-    const query = "mimeType='application/vnd.google-apps.folder' and trashed=false";
-    
-    const response = await drive.files.list({
-      q: query,
-      fields: 'files(id, name, parents, createdTime, modifiedTime)',
-      orderBy: 'name',
-      pageSize: 100
-    });
+    async function collectSubfolders(folderId: string): Promise<string[]> {
+      const response = await drive.files.list({
+        q: `'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+        fields: 'files(id)',
+        pageSize: 100,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true
+      });
+      const ids = (response.data.files || []).map(f => f.id!).filter(Boolean);
+      let all = [...ids];
+      for (const id of ids) {
+        all = all.concat(await collectSubfolders(id));
+      }
+      return all;
+    }
 
-    const folders = response.data.files || [];
+    const subIds = await collectSubfolders(rootFolderId);
+    const allIds = [rootFolderId, ...subIds];
 
-    // Construir árvore de pastas
-    const folderMap = new Map<string, any>();
-    const rootFolders: any[] = [];
+    const folders: Array<{
+      id: string;
+      name: string | null | undefined;
+      parents: string[];
+      createdTime?: string | null;
+      modifiedTime?: string | null;
+    }> = [];
 
-    // Primeiro, criar mapa de todas as pastas
+    for (const folderId of allIds) {
+      try {
+        const info = await drive.files.get({
+          fileId: folderId,
+          fields: 'id, name, parents, createdTime, modifiedTime',
+          supportsAllDrives: true
+        });
+        folders.push({
+          id: info.data.id!,
+          name: info.data.name,
+          parents: info.data.parents || [],
+          createdTime: info.data.createdTime,
+          modifiedTime: info.data.modifiedTime
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    const folderMap = new Map<string, {
+      id: string;
+      name: string | null | undefined;
+      parents: string[];
+      children: unknown[];
+    }>();
+    const rootFolders: unknown[] = [];
+
     folders.forEach(folder => {
-      folderMap.set(folder.id!, {
+      folderMap.set(folder.id, {
         id: folder.id,
         name: folder.name,
         parents: folder.parents || [],
@@ -52,36 +86,31 @@ export default async function handler(
       });
     });
 
-    // Depois, construir árvore
     folders.forEach(folder => {
-      const folderData = folderMap.get(folder.id!);
-      if (folderData) {
-        if (folderData.parents.length === 0) {
-          // Pasta raiz
+      const folderData = folderMap.get(folder.id);
+      if (!folderData) return;
+      if (folderData.parents.length === 0 || folder.id === rootFolderId) {
+        if (!rootFolders.includes(folderData)) {
           rootFolders.push(folderData);
+        }
+      } else {
+        const parent = folderMap.get(folderData.parents[0]);
+        if (parent) {
+          parent.children.push(folderData);
         } else {
-          // Adicionar como filho do pai
-          const parentId = folderData.parents[0];
-          const parent = folderMap.get(parentId);
-          if (parent) {
-            parent.children.push(folderData);
-          } else {
-            // Se o pai não está na lista, adicionar como raiz
-            rootFolders.push(folderData);
-          }
+          rootFolders.push(folderData);
         }
       }
     });
 
     res.json({
-      folders: folders,
+      folders,
       tree: rootFolders,
-      total: folders.length
+      total: folders.length,
+      rootFolderId
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao listar pastas:', error);
     res.status(500).json({ error: 'Falha ao listar pastas' });
   }
 }
-
-

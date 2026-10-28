@@ -15,6 +15,7 @@ import geocodingRoutes from './routes/geocoding.routes.js';
 import debugRoutes from './routes/debug.routes.js';
 import analysisRoutes from './routes/analysis.routes.js';
 import faceRoutes from './routes/face.routes.js';
+import leadersRoutes from './routes/leaders.routes.js';
 import keepAliveRoutes from './routes/keep-alive.routes.js';
 import faceRecognitionService from './services/faceRecognition.service.js';
 
@@ -28,9 +29,15 @@ const app = express();
 const PORT = process.env.BACKEND_PORT || 4000;
 
 // Validação básica de configuração
-if (!process.env.GOOGLE_CLIENT_ID || !process.env.SUPABASE_URL) {
-  console.error('❌ ERRO: Credenciais obrigatórias faltando no .env');
+if (!process.env.SUPABASE_URL) {
+  console.error('❌ ERRO: SUPABASE_URL faltando no .env');
   process.exit(1);
+}
+if (!process.env.DRIVE_FOLDER_ID) {
+  console.warn('⚠️  DRIVE_FOLDER_ID não configurado — sync/Drive indisponíveis até configurar');
+}
+if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  console.warn('⚠️  Service account não configurada — sync/Drive indisponíveis até configurar');
 }
 
 // Middlewares
@@ -98,6 +105,7 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/geocoding', geocodingRoutes);
 app.use('/api/analysis', analysisRoutes);
 app.use('/api/faces', faceRoutes);
+app.use('/api/leaders', leadersRoutes);
 app.use('/api', keepAliveRoutes);
 
 // Rotas de desenvolvimento (apenas em dev)

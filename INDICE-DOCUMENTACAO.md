@@ -22,6 +22,7 @@
 - `README.md` - Visão geral do projeto e como começar
 - `QUICKSTART.md` - Início rápido em 5 minutos
 - `SETUP.md` - Configuração passo a passo
+- `AUTH-DRIVE-SETUP.md` - Login e-mail/senha + Drive via service account
 - `GUIA-RAPIDO.md` - Guia do usuário final
 
 ### 🤖 Análise de IA

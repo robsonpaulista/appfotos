@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { requireAuth } from '../../../lib/api-server/auth';
+import { requireAdmin } from '../../../lib/api-server/auth';
 import { supabase } from '../../../lib/api-server/supabase.config';
 
 /**
@@ -16,9 +16,9 @@ export default async function handler(
   }
 
   try {
-    const auth = await requireAuth(req);
+    const auth = await requireAdmin(req);
     if (!auth) {
-      return res.status(401).json({ error: 'Não autenticado' });
+      return res.status(403).json({ error: 'Acesso restrito a administradores' });
     }
 
     const { analyzeWithVision = false, folderId = null, tags = null } = req.body;

@@ -50,10 +50,24 @@ CREATE TABLE IF NOT EXISTS photo_tags (
 CREATE INDEX IF NOT EXISTS idx_photo_tags_photo_id ON photo_tags(photo_id);
 CREATE INDEX IF NOT EXISTS idx_photo_tags_tag ON photo_tags(tag);
 
--- Criar tabela de usuários (para gerenciar tokens)
+-- Perfis do app (id = auth.users.id do Supabase Auth — e-mail/senha)
+-- Execute também database/migrations/add_app_users_and_library.sql em bases já existentes
+CREATE TABLE IF NOT EXISTS app_users (
+    id UUID PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    name TEXT,
+    role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('admin', 'viewer')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email);
+CREATE INDEX IF NOT EXISTS idx_app_users_role ON app_users(role);
+
+-- Legado: tabela users com tokens OAuth (não usada no login atual)
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    google_id TEXT UNIQUE NOT NULL,
+    google_id TEXT UNIQUE,
     email TEXT NOT NULL,
     name TEXT,
     access_token TEXT,
@@ -65,6 +79,9 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+ALTER TABLE photos ADD COLUMN IF NOT EXISTS drive_folder_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_photos_drive_folder_id ON photos(drive_folder_id);
 
 -- Criar tabela de eventos de sincronização
 CREATE TABLE IF NOT EXISTS sync_events (
@@ -117,5 +134,7 @@ GROUP BY p.id;
 -- Comentários nas tabelas
 COMMENT ON TABLE photos IS 'Armazena metadados e análises das fotos do Google Drive';
 COMMENT ON TABLE photo_tags IS 'Tags personalizadas associadas às fotos';
-COMMENT ON TABLE users IS 'Usuários autenticados com tokens OAuth do Google';
+COMMENT ON TABLE app_users IS 'Perfis do app (Supabase Auth e-mail/senha); sem tokens Google';
+COMMENT ON TABLE users IS 'Legado OAuth Google — não usado no login atual';
 COMMENT ON TABLE sync_events IS 'Histórico de sincronizações com o Google Drive';
+COMMENT ON COLUMN photos.user_id IS 'ID da biblioteca (DRIVE_FOLDER_ID), compartilhado entre usuários';

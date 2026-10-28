@@ -204,6 +204,10 @@ class FaceRecognitionService {
 
       if (error) throw error;
 
+      if (!allDescriptors || allDescriptors.length === 0) {
+        return [];
+      }
+
       // Comparar com cada descritor
       const matches = allDescriptors
         .map(desc => ({
@@ -220,6 +224,106 @@ class FaceRecognitionService {
       console.error('Erro ao buscar rostos similares:', error);
       return [];
     }
+  }
+
+  /**
+   * Escolhe o maior rosto entre detecções
+   */
+  pickPrimaryDetection(detections) {
+    if (!detections || detections.length === 0) return null;
+    return detections.reduce((best, current) => {
+      const bestArea = (best.box?.width || 0) * (best.box?.height || 0);
+      const currentArea = (current.box?.width || 0) * (current.box?.height || 0);
+      return currentArea > bestArea ? current : best;
+    });
+  }
+
+  /**
+   * Busca no acervo e devolve fotos únicas enriquecidas
+   */
+  async searchArchiveByDescriptor(targetDescriptor, threshold = 0.5, libraryUserId) {
+    const matches = await this.findSimilarFaces(targetDescriptor, threshold);
+
+    if (matches.length === 0) {
+      return { matches: [], indexedFaces: await this.countIndexedFaces() };
+    }
+
+    // Melhor match por foto
+    const bestByPhoto = new Map();
+    for (const match of matches) {
+      const existing = bestByPhoto.get(match.photo_id);
+      if (!existing || match.distance < existing.distance) {
+        bestByPhoto.set(match.photo_id, match);
+      }
+    }
+
+    const photoIds = [...bestByPhoto.keys()];
+    let query = supabase
+      .from('photos')
+      .select('*')
+      .in('id', photoIds);
+
+    if (libraryUserId) {
+      query = query.eq('user_id', libraryUserId);
+    }
+
+    const { data: photos, error } = await query;
+    if (error) throw error;
+
+    const enriched = [...bestByPhoto.values()]
+      .map((match) => {
+        const photo = photos?.find((p) => p.id === match.photo_id);
+        if (!photo) return null;
+        const similarity = Math.max(0, Math.min(1, 1 - match.distance));
+        return {
+          ...match,
+          similarity,
+          photo
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.distance - b.distance);
+
+    return {
+      matches: enriched,
+      indexedFaces: await this.countIndexedFaces()
+    };
+  }
+
+  async countIndexedFaces() {
+    const { count } = await supabase
+      .from('face_descriptors')
+      .select('*', { count: 'exact', head: true });
+    return count || 0;
+  }
+
+  /**
+   * Detecta rostos a partir de um buffer e busca no acervo
+   */
+  async searchByImageBuffer(imageBuffer, mimeType = 'image/jpeg', threshold = 0.5, libraryUserId) {
+    const detections = await this.detectFaces(imageBuffer, mimeType);
+    if (detections.length === 0) {
+      return {
+        error: 'no_face',
+        message: 'Nenhum rosto detectado na imagem. Tente outra foto, mais nítida e de frente.',
+        matches: [],
+        facesDetected: 0,
+        indexedFaces: await this.countIndexedFaces()
+      };
+    }
+
+    const primary = this.pickPrimaryDetection(detections);
+    const result = await this.searchArchiveByDescriptor(
+      primary.descriptor,
+      threshold,
+      libraryUserId
+    );
+
+    return {
+      facesDetected: detections.length,
+      matches: result.matches,
+      indexedFaces: result.indexedFaces
+    };
   }
 
   /**

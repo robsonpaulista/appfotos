@@ -14,34 +14,42 @@ export function useAuth() {
   const checkAuthStatus = async () => {
     try {
       setLoading(true);
+      setError(null);
       const response = await api.getAuthStatus();
-      
       const status = response as AuthStatus;
-      
-      // Se não tiver imageToken mas tiver user.id, gerar token no frontend como fallback
+
       if (status.authenticated && status.user && !status.imageToken) {
-        // Gerar token no frontend usando base64 do userId
         if (typeof window !== 'undefined' && typeof btoa !== 'undefined') {
           status.imageToken = btoa(status.user.id);
         }
       }
-      
+
       setAuthStatus(status);
     } catch (err) {
       console.error('Erro ao verificar autenticação:', err);
       setError('Falha ao verificar autenticação');
+      setAuthStatus({ authenticated: false });
     } finally {
       setLoading(false);
     }
   };
 
-  const login = async () => {
+  const login = async (email: string, password: string) => {
     try {
-      const { authUrl } = await api.getAuthUrl();
-      window.location.href = authUrl;
-    } catch (err) {
-      console.error('Erro ao obter URL de autenticação:', err);
-      setError('Falha ao iniciar autenticação');
+      setError(null);
+      setLoading(true);
+      const status = await api.login(email, password);
+      setAuthStatus(status);
+      return status;
+    } catch (err: unknown) {
+      console.error('Erro ao fazer login:', err);
+      const message =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        'Falha ao fazer login';
+      setError(message);
+      throw new Error(message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -65,4 +73,3 @@ export function useAuth() {
     refresh: checkAuthStatus,
   };
 }
-

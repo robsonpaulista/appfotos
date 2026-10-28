@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { requireAuth } from '../../../lib/api-server/auth';
+import { getLibrarySourceId } from '../../../lib/api-server/google.config';
 import { supabase } from '../../../lib/api-server/supabase.config';
 
 /**
@@ -28,7 +29,7 @@ export default async function handler(
       const { data: eventCities } = await supabase
         .from('photos')
         .select('event_city')
-        .eq('user_id', auth.userId)
+        .eq('user_id', getLibrarySourceId())
         .not('event_city', 'is', null);
 
       eventCities?.forEach(p => {
@@ -43,7 +44,7 @@ export default async function handler(
     const { data: locations } = await supabase
       .from('photos')
       .select('location_name')
-      .eq('user_id', auth.userId)
+      .eq('user_id', getLibrarySourceId())
       .not('location_name', 'is', null);
 
     locations?.forEach(p => {
@@ -68,5 +69,6 @@ export default async function handler(
     res.status(500).json({ error: 'Falha ao listar cidades' });
   }
 }
+
 
 

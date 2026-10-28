@@ -1,56 +1,34 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { supabase } from '../../../lib/api-server/supabase.config';
-import { parseSessionCookie } from '../../../lib/api-server/auth';
+import { requireAuth } from '../../../lib/api-server/auth';
 
 /**
  * GET /api/auth/status
- * Verifica status de autenticação
  */
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse
-) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Método não permitido' });
   }
 
   try {
-    const session = parseSessionCookie(req);
-    
-    if (!session || !session.userId) {
+    const auth = await requireAuth(req);
+    if (!auth) {
       return res.json({ authenticated: false });
     }
 
-    // Verificar se usuário ainda existe
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('id, email, name, google_id')
-      .eq('id', session.userId)
-      .single();
+    const imageToken = Buffer.from(auth.user.id, 'utf-8').toString('base64');
 
-    if (error || !user) {
-      return res.json({ authenticated: false });
-    }
-
-    // Gerar token temporário para requisições de imagem (base64 do userId)
-    // Em produção, deveria ser um JWT assinado com expiração
-    const imageToken = Buffer.from(user.id, 'utf-8').toString('base64');
-    
-    const responseData = {
+    return res.status(200).json({
       authenticated: true,
       user: {
-        id: String(user.id),
-        email: String(user.email || ''),
-        name: String(user.name || '')
+        id: auth.user.id,
+        email: auth.user.email,
+        name: auth.user.name || '',
+        role: auth.user.role
       },
-      imageToken: String(imageToken)
-    };
-    
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    return res.status(200).send(JSON.stringify(responseData));
-  } catch (error: any) {
+      imageToken
+    });
+  } catch (error) {
     console.error('Erro ao verificar status:', error);
-    res.status(500).json({ error: 'Falha ao verificar status de autenticação' });
+    return res.status(500).json({ error: 'Falha ao verificar status de autenticação' });
   }
 }
-

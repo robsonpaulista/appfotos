@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { requireAuth } from '../../../lib/api-server/auth';
+import { getLibrarySourceId } from '../../../lib/api-server/google.config';
 import { supabase } from '../../../lib/api-server/supabase.config';
 
 /**
@@ -24,7 +25,7 @@ export default async function handler(
     const { data } = await supabase
       .from('photos')
       .select('event_type')
-      .eq('user_id', auth.userId)
+      .eq('user_id', getLibrarySourceId())
       .not('event_type', 'is', null);
 
     const types = [...new Set(data?.map(p => p.event_type))].filter(Boolean).sort();
@@ -34,5 +35,6 @@ export default async function handler(
     res.status(500).json({ error: 'Falha ao listar tipos' });
   }
 }
+
 
 

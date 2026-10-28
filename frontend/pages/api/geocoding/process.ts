@@ -30,13 +30,17 @@ export default async function handler(
           const { supabase } = await import('../../../lib/api-server/supabase.config');
           const userId = Buffer.from(tokenValue, 'base64').toString('utf-8');
           const { data: user } = await supabase
-            .from('users')
-            .select('id')
+            .from('app_users')
+            .select('id, email, name, role')
             .eq('id', userId)
             .single();
           
           if (user) {
-            auth = { userId: user.id, user };
+            auth = {
+              userId: user.id,
+              user: { id: user.id, email: user.email, name: user.name, role: user.role },
+              accessToken: ''
+            };
           }
         } catch {
           // Ignorar erro

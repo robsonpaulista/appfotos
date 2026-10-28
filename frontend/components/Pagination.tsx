@@ -17,79 +17,61 @@ export function Pagination({ currentPage, totalPages, onPageChange }: Pagination
       for (let i = 1; i <= totalPages; i++) {
         pages.push(i);
       }
+    } else if (currentPage <= 4) {
+      for (let i = 1; i <= 5; i++) pages.push(i);
+      pages.push('…', totalPages);
+    } else if (currentPage >= totalPages - 3) {
+      pages.push(1, '…');
+      for (let i = totalPages - 4; i <= totalPages; i++) pages.push(i);
     } else {
-      if (currentPage <= 4) {
-        for (let i = 1; i <= 5; i++) {
-          pages.push(i);
-        }
-        pages.push('...');
-        pages.push(totalPages);
-      } else if (currentPage >= totalPages - 3) {
-        pages.push(1);
-        pages.push('...');
-        for (let i = totalPages - 4; i <= totalPages; i++) {
-          pages.push(i);
-        }
-      } else {
-        pages.push(1);
-        pages.push('...');
-        for (let i = currentPage - 1; i <= currentPage + 1; i++) {
-          pages.push(i);
-        }
-        pages.push('...');
-        pages.push(totalPages);
-      }
+      pages.push(1, '…', currentPage - 1, currentPage, currentPage + 1, '…', totalPages);
     }
 
     return pages;
   };
 
+  const navBtn =
+    'border border-ink/12 bg-white px-3.5 py-2 text-sm font-medium text-ink/70 transition-colors hover:border-ink/25 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40';
+
   return (
-    <div className="flex items-center justify-center gap-3 my-12 flex-wrap">
+    <div className="my-10 flex flex-wrap items-center justify-center gap-2">
       <button
         onClick={() => onPageChange(currentPage - 1)}
         disabled={currentPage === 1}
-        className="px-4 py-2 bg-white border border-slate-300 rounded-xl font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+        className={navBtn}
       >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
         Anterior
       </button>
 
-      <div className="flex gap-2">
-        {getPageNumbers().map((page, index) => (
+      <div className="flex gap-1">
+        {getPageNumbers().map((page, index) =>
           typeof page === 'number' ? (
             <button
               key={index}
               onClick={() => onPageChange(page)}
-              className={`w-10 h-10 rounded-xl font-semibold transition-all duration-300 ${
+              className={`h-10 min-w-[2.5rem] px-2 text-sm font-semibold transition-colors ${
                 page === currentPage
-                  ? 'bg-gradient-to-r from-primary-600 to-primary-500 text-white shadow-lg shadow-primary-500/30'
-                  : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
+                  ? 'bg-primary-500 text-ink'
+                  : 'border border-ink/10 bg-white text-ink/65 hover:border-ink/25'
               }`}
             >
               {page}
             </button>
           ) : (
-            <span key={index} className="w-10 h-10 flex items-center justify-center text-slate-400">
+            <span key={index} className="flex h-10 w-8 items-center justify-center text-ink/35">
               {page}
             </span>
           )
-        ))}
+        )}
       </div>
 
       <button
         onClick={() => onPageChange(currentPage + 1)}
         disabled={currentPage === totalPages}
-        className="px-4 py-2 bg-white border border-slate-300 rounded-xl font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+        className={navBtn}
       >
         Próxima
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
       </button>
     </div>
   );
 }
-

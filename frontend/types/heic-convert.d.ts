@@ -9,3 +9,4 @@ declare module 'heic-convert' {
   export default convert;
 }
 
+

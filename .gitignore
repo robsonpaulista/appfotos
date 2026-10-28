@@ -36,6 +36,9 @@ Thumbs.db
 # Vercel
 .vercel
 
+# Fotos locais só para teste (não versionar)
+fotosteste/
+
 # Temporários
 *.tmp
 *.temp

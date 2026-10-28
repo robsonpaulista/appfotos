@@ -88,10 +88,38 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  role?: 'admin' | 'viewer';
+  created_at?: string;
 }
 
 export interface AuthStatus {
   authenticated: boolean;
   user?: User;
-  imageToken?: string; // Token temporário para requisições de imagem
+  imageToken?: string;
+}
+
+export interface Leader {
+  id: string;
+  name: string;
+  city: string | null;
+  role_title: string | null;
+  photo_data: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface FaceSearchMatch {
+  photo_id: string;
+  distance: number;
+  similarity: number;
+  photo: Photo;
+}
+
+export interface FaceSearchResult {
+  facesDetected?: number;
+  matches: FaceSearchMatch[];
+  indexedFaces?: number;
+  message?: string;
+  error?: string;
+  leader?: Leader;
 }

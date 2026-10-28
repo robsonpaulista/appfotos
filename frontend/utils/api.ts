@@ -1,5 +1,14 @@
 import axios, { AxiosInstance } from 'axios';
-import type { PhotosResponse, Photo, PhotoFilters, AuthStatus, SyncEvent } from '@/types/photo';
+import type {
+  PhotosResponse,
+  Photo,
+  PhotoFilters,
+  AuthStatus,
+  SyncEvent,
+  User,
+  Leader,
+  FaceSearchResult,
+} from '@/types/photo';
 
 // No Vercel, as rotas da API estão no mesmo domínio (rotas relativas)
 // Em desenvolvimento, pode usar um backend separado
@@ -9,14 +18,30 @@ function getBaseUrl(): string {
     return ''; // Rotas relativas
   }
   
-  // Em desenvolvimento, usar backend separado se configurado
-  return process.env.NEXT_PUBLIC_BACKEND_URL || '';
+  // Em desenvolvimento, auth/fotos via Next (rotas relativas) por padrão
+  return process.env.NEXT_PUBLIC_API_URL || '';
+}
+
+/**
+ * Express (Face-API / lideranças).
+ * Em rede local: usa o mesmo host da página (ex.: celular em http://192.168.x.x:3000
+ * → API em http://192.168.x.x:4000). Em localhost, usa NEXT_PUBLIC_BACKEND_URL.
+ */
+function getExpressBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host && host !== 'localhost' && host !== '127.0.0.1') {
+      return `${window.location.protocol}//${host}:4000`;
+    }
+  }
+  return process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
 }
 
 const BASE_URL = getBaseUrl();
 
 class ApiClient {
   private client: AxiosInstance;
+  private express: AxiosInstance;
 
   constructor() {
     this.client = axios.create({
@@ -26,11 +51,21 @@ class ApiClient {
         'Content-Type': 'application/json',
       },
     });
+
+    this.express = axios.create({
+      baseURL: getExpressBaseUrl(),
+      withCredentials: true,
+    });
+
+    // Em rede local o hostname só existe no browser — ajusta a base do Express
+    if (typeof window !== 'undefined') {
+      this.express.defaults.baseURL = getExpressBaseUrl();
+    }
   }
 
   // Auth endpoints
-  async getAuthUrl(): Promise<{ authUrl: string }> {
-    const { data } = await this.client.get('/api/auth/url');
+  async login(email: string, password: string): Promise<AuthStatus> {
+    const { data } = await this.client.post('/api/auth/login', { email, password });
     return data;
   }
 
@@ -41,6 +76,33 @@ class ApiClient {
 
   async logout(): Promise<void> {
     await this.client.post('/api/auth/logout');
+  }
+
+  async getAppUsers(): Promise<User[]> {
+    const { data } = await this.client.get('/api/auth/users');
+    return data.users || [];
+  }
+
+  async createAppUser(payload: {
+    email: string;
+    password: string;
+    name?: string;
+    role?: 'admin' | 'viewer';
+  }): Promise<{ user: User }> {
+    const { data } = await this.client.post('/api/auth/users', payload);
+    return data;
+  }
+
+  async updateAppUser(
+    id: string,
+    payload: { name?: string; role?: 'admin' | 'viewer'; password?: string }
+  ): Promise<{ user: User }> {
+    const { data } = await this.client.put(`/api/auth/users/${id}`, payload);
+    return data;
+  }
+
+  async deleteAppUser(id: string): Promise<void> {
+    await this.client.delete(`/api/auth/users/${id}`);
   }
 
   // Photo endpoints
@@ -152,6 +214,62 @@ class ApiClient {
   async getDevStats(): Promise<any> {
     const { data } = await this.client.get('/api/dev/stats');
     return data;
+  }
+
+  // Face search (Express)
+  async searchByImage(file: Blob, threshold?: number): Promise<FaceSearchResult> {
+    const form = new FormData();
+    form.append('image', file, file instanceof File ? file.name : 'capture.jpg');
+    if (threshold != null) form.append('threshold', String(threshold));
+    const { data } = await this.express.post('/api/faces/search-by-image', form);
+    return data;
+  }
+
+  async searchByLeader(leaderId: string, threshold?: number): Promise<FaceSearchResult> {
+    const { data } = await this.express.post(
+      '/api/faces/search-by-leader',
+      { leaderId, threshold },
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    return data;
+  }
+
+  async indexLibraryFaces(limit: number = 30): Promise<{
+    processed: number;
+    facesTotal: number;
+    message?: string;
+  }> {
+    const { data } = await this.express.post(
+      '/api/faces/index-library',
+      { limit },
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    return data;
+  }
+
+  // Leaders CRUD (Express)
+  async getLeaders(params?: { q?: string; city?: string }): Promise<Leader[]> {
+    const { data } = await this.express.get('/api/leaders', { params });
+    return data.leaders || [];
+  }
+
+  async createLeader(payload: {
+    name: string;
+    city?: string;
+    role_title?: string;
+    photo: File;
+  }): Promise<Leader> {
+    const form = new FormData();
+    form.append('name', payload.name);
+    if (payload.city) form.append('city', payload.city);
+    if (payload.role_title) form.append('role_title', payload.role_title);
+    form.append('photo', payload.photo);
+    const { data } = await this.express.post('/api/leaders', form);
+    return data.leader;
+  }
+
+  async deleteLeader(id: string): Promise<void> {
+    await this.express.delete(`/api/leaders/${id}`);
   }
 }
 

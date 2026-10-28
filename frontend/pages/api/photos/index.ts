@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { requireAuth } from '../../../lib/api-server/auth';
+import { getLibrarySourceId } from '../../../lib/api-server/google.config';
 import { supabase } from '../../../lib/api-server/supabase.config';
 
 /**
@@ -51,7 +52,7 @@ export default async function handler(
     let query = supabase
       .from('photos')
       .select(selectColumns, { count: 'exact' })
-      .eq('user_id', auth.userId)
+      .eq('user_id', getLibrarySourceId())
       .order('created_at', { ascending: false });
 
     if (hasTagFilter) {

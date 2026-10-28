@@ -1,5 +1,4 @@
-import { google } from 'googleapis';
-import { oauth2Client } from '../config/google.config.js';
+import { getServiceAccessToken } from '../config/google.config.js';
 import sharp from 'sharp';
 import axios from 'axios';
 
@@ -84,8 +83,8 @@ class VisionService {
       const processedBuffer = await this.processImageBuffer(imageBuffer);
       const base64Image = processedBuffer.toString('base64');
       
-      // Obter token de acesso
-      const { token } = await oauth2Client.getAccessToken();
+      // Token da service account
+      const token = await getServiceAccessToken();
       
       // Fazer requisição direta via API REST
       const requestBody = {

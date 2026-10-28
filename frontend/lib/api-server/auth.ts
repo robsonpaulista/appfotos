@@ -1,17 +1,26 @@
-import type { NextApiRequest } from 'next';
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { createClient } from '@supabase/supabase-js';
 import { supabase } from './supabase.config';
-import { setCredentials } from './google.config';
 
-interface SessionData {
-  userId: string;
-  googleId: string;
-  expires: string;
+export type AppRole = 'admin' | 'viewer';
+
+export interface AppUser {
+  id: string;
+  email: string;
+  name: string | null;
+  role: AppRole;
 }
 
-/**
- * Parse session cookie da requisição
- */
-export function parseSessionCookie(req: NextApiRequest): SessionData | null {
+export interface AuthResult {
+  userId: string;
+  user: AppUser;
+  accessToken: string;
+}
+
+const SESSION_COOKIE = 'pf_access_token';
+const REFRESH_COOKIE = 'pf_refresh_token';
+
+function getCookie(req: NextApiRequest, name: string): string | null {
   const cookieHeader = req.headers.cookie;
   if (!cookieHeader) return null;
 
@@ -25,60 +34,113 @@ export function parseSessionCookie(req: NextApiRequest): SessionData | null {
     return acc;
   }, {} as Record<string, string>);
 
-  const sessionCookie = cookies.session;
-  if (!sessionCookie) return null;
+  return cookies[name] || null;
+}
 
-  try {
-    const session = JSON.parse(sessionCookie);
-    
-    // Verificar se expirou
-    if (new Date(session.expires) < new Date()) {
-      return null;
-    }
-    
-    return session;
-  } catch {
-    return null;
+function cookieOptions(maxAgeSeconds: number): string {
+  const isProduction = process.env.NODE_ENV === 'production' || !!process.env.VERCEL_URL;
+  return [
+    'HttpOnly',
+    'Path=/',
+    `Max-Age=${maxAgeSeconds}`,
+    isProduction ? 'SameSite=Lax; Secure' : 'SameSite=Lax'
+  ].join('; ');
+}
+
+export function setAuthCookies(
+  res: NextApiResponse,
+  accessToken: string,
+  refreshToken?: string | null,
+  expiresIn = 3600
+) {
+  const cookies = [
+    `${SESSION_COOKIE}=${encodeURIComponent(accessToken)}; ${cookieOptions(expiresIn)}`
+  ];
+  if (refreshToken) {
+    cookies.push(
+      `${REFRESH_COOKIE}=${encodeURIComponent(refreshToken)}; ${cookieOptions(60 * 60 * 24 * 30)}`
+    );
   }
+  res.setHeader('Set-Cookie', cookies);
+}
+
+export function clearAuthCookies(res: NextApiResponse) {
+  res.setHeader('Set-Cookie', [
+    `${SESSION_COOKIE}=; ${cookieOptions(0)}`,
+    `${REFRESH_COOKIE}=; ${cookieOptions(0)}`
+  ]);
+}
+
+function createAnonAuthClient() {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new Error('SUPABASE_URL e SUPABASE_ANON_KEY são obrigatórios para login');
+  }
+  return createClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+}
+
+export async function signInWithPassword(email: string, password: string) {
+  const client = createAnonAuthClient();
+  const { data, error } = await client.auth.signInWithPassword({ email, password });
+  if (error || !data.session || !data.user) {
+    throw new Error(error?.message || 'Credenciais inválidas');
+  }
+  return data;
+}
+
+async function loadAppUser(userId: string): Promise<AppUser | null> {
+  const { data, error } = await supabase
+    .from('app_users')
+    .select('id, email, name, role')
+    .eq('id', userId)
+    .single();
+
+  if (error || !data) return null;
+  return {
+    id: data.id,
+    email: data.email,
+    name: data.name,
+    role: data.role as AppRole
+  };
 }
 
 /**
- * Middleware para verificar autenticação
+ * Valida JWT do cookie e carrega perfil em app_users
  */
-export async function requireAuth(req: NextApiRequest): Promise<{ userId: string; user: any } | null> {
-  const session = parseSessionCookie(req);
-  
-  if (!session || !session.userId) {
-    return null;
-  }
+export async function requireAuth(req: NextApiRequest): Promise<AuthResult | null> {
+  const accessToken = getCookie(req, SESSION_COOKIE);
+  if (!accessToken) return null;
 
   try {
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('id, access_token, refresh_token, token_expiry')
-      .eq('id', session.userId)
-      .single();
+    const { data: authData, error } = await supabase.auth.getUser(accessToken);
+    if (error || !authData.user) return null;
 
-    if (error || !user) {
-      return null;
-    }
-
-    // Configurar credenciais do Google
-    if (user.access_token) {
-      setCredentials({
-        access_token: user.access_token,
-        refresh_token: user.refresh_token,
-        expiry_date: user.token_expiry ? new Date(user.token_expiry).getTime() : undefined
-      });
-    }
+    const profile = await loadAppUser(authData.user.id);
+    if (!profile) return null;
 
     return {
-      userId: user.id,
-      user
+      userId: profile.id,
+      user: profile,
+      accessToken
     };
-  } catch (error) {
-    console.error('Erro na autenticação:', error);
+  } catch (err) {
+    console.error('Erro na autenticação:', err);
     return null;
   }
 }
 
+export async function requireAdmin(req: NextApiRequest): Promise<AuthResult | null> {
+  const auth = await requireAuth(req);
+  if (!auth || auth.user.role !== 'admin') return null;
+  return auth;
+}
+
+/** @deprecated Preferir requireAuth; mantido para compatibilidade */
+export function parseSessionCookie(req: NextApiRequest): { userId: string } | null {
+  const token = getCookie(req, SESSION_COOKIE);
+  if (!token) return null;
+  return { userId: 'pending' };
+}

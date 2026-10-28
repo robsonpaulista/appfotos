@@ -119,10 +119,10 @@ export function PhotoCard({ photo, onClick, isSelectionMode = false, isSelected 
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && handleCardClick()}
-      className={`group relative bg-white rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-2 cursor-pointer ${
-        isSelected 
-          ? 'ring-4 ring-primary-500 border-transparent scale-95' 
-          : 'border border-slate-200/60'
+      className={`group relative cursor-pointer overflow-hidden border bg-white transition-all duration-200 ${
+        isSelected
+          ? 'border-primary-500 ring-2 ring-primary-500/40'
+          : 'border-ink/10 hover:border-ink/25'
       }`}
     >
       {/* Imagem */}
@@ -154,15 +154,15 @@ export function PhotoCard({ photo, onClick, isSelectionMode = false, isSelected 
         {/* Checkbox de Seleção */}
         {isSelectionMode && (
           <div className="absolute top-3 left-3 z-10">
-            <div 
-              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 ${
-                isSelected 
-                  ? 'bg-primary-500 scale-110 shadow-lg' 
-                  : 'bg-white/90 backdrop-blur-sm border-2 border-white'
+            <div
+              className={`flex h-8 w-8 items-center justify-center transition-all duration-200 ${
+                isSelected
+                  ? 'bg-primary-500'
+                  : 'border-2 border-white bg-white/90'
               }`}
             >
               {isSelected && (
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-5 w-5 text-ink" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                 </svg>
               )}

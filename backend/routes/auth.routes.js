@@ -1,298 +1,305 @@
 import express from 'express';
-import { getAuthUrl, getTokensFromCode, setCredentials } from '../config/google.config.js';
 import { supabase } from '../config/supabase.config.js';
-import { google } from 'googleapis';
+import {
+  createAnonAuthClient,
+  requireAdmin,
+  loadAppUser,
+  SESSION_COOKIE
+} from '../middleware/auth.js';
 
 const router = express.Router();
+const REFRESH_COOKIE = 'pf_refresh_token';
+
+function cookieFlags(maxAgeSeconds) {
+  const isProduction = process.env.NODE_ENV === 'production';
+  return [
+    'HttpOnly',
+    'Path=/',
+    `Max-Age=${maxAgeSeconds}`,
+    isProduction ? 'SameSite=Lax; Secure' : 'SameSite=Lax'
+  ].join('; ');
+}
+
+function setAuthCookies(res, accessToken, refreshToken, expiresIn = 3600) {
+  const cookies = [
+    `${SESSION_COOKIE}=${encodeURIComponent(accessToken)}; ${cookieFlags(expiresIn)}`
+  ];
+  if (refreshToken) {
+    cookies.push(
+      `${REFRESH_COOKIE}=${encodeURIComponent(refreshToken)}; ${cookieFlags(60 * 60 * 24 * 30)}`
+    );
+  }
+  res.setHeader('Set-Cookie', cookies);
+}
+
+function clearAuthCookies(res) {
+  res.setHeader('Set-Cookie', [
+    `${SESSION_COOKIE}=; ${cookieFlags(0)}`,
+    `${REFRESH_COOKIE}=; ${cookieFlags(0)}`
+  ]);
+}
 
 /**
- * GET /api/auth/url
- * Retorna URL de autenticação do Google
- * Aceita parâmetro opcional 'redirect_uri' para suportar acesso pela rede interna
+ * POST /api/auth/login
+ * Login com e-mail e senha (Supabase Auth)
  */
-router.get('/url', (req, res) => {
+router.post('/login', async (req, res) => {
   try {
-    // IMPORTANTE: Google OAuth não aceita IPs privados (192.168.x.x)
-    // Sempre usar localhost para o redirect_uri
-    const backendPort = process.env.BACKEND_PORT || 4000;
-    const redirectUri = `http://localhost:${backendPort}/api/auth/callback`;
-    
-    // Detectar URL do frontend original para redirecionar corretamente após auth
-    const frontendOrigin = req.get('origin') || req.get('referer') || process.env.FRONTEND_URL || 'http://localhost:3000';
-    let frontendUrl = frontendOrigin;
-    let isNetworkAccess = false;
-    
-    try {
-      const originUrl = new URL(frontendOrigin);
-      frontendUrl = `${originUrl.protocol}//${originUrl.host}`;
-      
-      // Verificar se está acessando pela rede (não localhost)
-      isNetworkAccess = !originUrl.hostname.includes('localhost') && 
-                        !originUrl.hostname.includes('127.0.0.1') &&
-                        originUrl.hostname !== '::1';
-      
-      if (isNetworkAccess) {
-        console.warn('⚠️  ATENÇÃO: Acesso pela rede detectado!');
-        console.warn('⚠️  O Google vai redirecionar para localhost, que só funciona no servidor.');
-        console.warn('💡 SOLUÇÃO: Após autenticar no Google, copie a URL completa do callback');
-        console.warn('💡 e acesse diretamente no servidor (ou use ngrok para túnel público)');
-      }
-    } catch (e) {
-      console.warn('⚠️ Não foi possível parsear origin:', e.message);
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: 'E-mail e senha são obrigatórios' });
     }
-    
-    // Adicionar o frontend_url como parâmetro na URL de auth para usar no callback
-    const authUrl = getAuthUrl(redirectUri, frontendUrl);
-    
-    console.log('✅ Usando redirect_uri (sempre localhost):', redirectUri);
-    console.log('📍 Frontend original:', frontendUrl);
-    
-    res.json({ 
-      authUrl, 
-      redirectUri,
-      warning: isNetworkAccess ? 'Acesso pela rede detectado. Após autenticar, copie a URL do callback e acesse no servidor.' : null
+
+    const client = createAnonAuthClient();
+    const { data, error } = await client.auth.signInWithPassword({
+      email: String(email).trim().toLowerCase(),
+      password: String(password)
     });
-  } catch (error) {
-    console.error('Erro ao gerar URL de autenticação:', error);
-    res.status(500).json({ error: 'Falha ao gerar URL de autenticação' });
-  }
-});
 
-/**
- * GET /api/auth/callback
- * Callback após autenticação no Google
- */
-router.get('/callback', async (req, res) => {
-  const { code, error: authError, state } = req.query;
-
-  console.log('=== CALLBACK DE AUTENTICAÇÃO ===');
-  console.log('Code recebido:', code ? 'SIM' : 'NÃO');
-  console.log('Erro do Google:', authError || 'NENHUM');
-  console.log('State recebido:', state || 'NENHUM');
-
-  // Decodificar state para obter frontendUrl original
-  let frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-  if (state) {
-    try {
-      const stateData = JSON.parse(Buffer.from(state, 'base64').toString());
-      if (stateData.frontendUrl) {
-        frontendUrl = stateData.frontendUrl;
-        console.log('📍 Frontend URL do state:', frontendUrl);
-      }
-    } catch (e) {
-      console.warn('⚠️ Não foi possível decodificar state:', e.message);
+    if (error || !data.session || !data.user) {
+      return res.status(401).json({ error: 'E-mail ou senha inválidos' });
     }
-  }
 
-  if (authError) {
-    console.error('Erro retornado pelo Google:', authError);
-    return res.redirect(`${frontendUrl}?auth=error&reason=${authError}`);
-  }
+    const profile = await loadAppUser(data.user.id);
+    if (!profile) {
+      return res.status(403).json({
+        error: 'Usuário sem perfil no app. Peça a um administrador para liberar o acesso.'
+      });
+    }
 
-  if (!code) {
-    console.error('Código de autenticação não fornecido');
-    return res.redirect(`${frontendUrl}?auth=error&reason=no_code`);
-  }
-
-  try {
-    // SEMPRE usar localhost para o redirect_uri (Google não aceita IPs privados)
-    const backendPort = process.env.BACKEND_PORT || 4000;
-    const redirectUri = `http://localhost:${backendPort}/api/auth/callback`;
-    
-    console.log('✅ Usando redirect_uri (localhost):', redirectUri);
-    
-    // Criar cliente OAuth2 com redirect_uri localhost
-    const oauth2ClientForToken = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      redirectUri
+    setAuthCookies(
+      res,
+      data.session.access_token,
+      data.session.refresh_token,
+      data.session.expires_in || 3600
     );
-    
-    const tokenResponse = await oauth2ClientForToken.getToken(code);
-    const tokens = tokenResponse.tokens;
-    setCredentials(tokens);
 
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      redirectUri
-    );
-    oauth2Client.setCredentials(tokens);
-    
-    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
-    const { data: userInfo } = await oauth2.userinfo.get();
+    const imageToken = Buffer.from(profile.id, 'utf-8').toString('base64');
 
-    // Validar configuração do Supabase antes de usar
-    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
-      console.error('❌ ERRO: Variáveis do Supabase não configuradas!');
-      console.error('SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ Configurado' : '❌ Faltando');
-      console.error('SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? '✅ Configurado' : '❌ Faltando');
-      throw new Error('Configuração do Supabase incompleta. Verifique as variáveis de ambiente.');
-    }
-
-    console.log('💾 Tentando salvar usuário no Supabase...');
-    console.log('📧 Email:', userInfo.email);
-    console.log('🆔 Google ID:', userInfo.id);
-    
-    // Verificar se a API key está configurada
-    const currentKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!currentKey) {
-      throw new Error('SUPABASE_SERVICE_KEY ou SUPABASE_ANON_KEY não encontrado nas variáveis de ambiente');
-    }
-    console.log('🔑 API Key configurada:', currentKey ? `${currentKey.substring(0, 10)}...${currentKey.substring(currentKey.length - 4)}` : '❌ FALTANDO');
-
-    // Preparar dados do usuário
-    const userData = {
-      google_id: userInfo.id,
-      email: userInfo.email,
-      name: userInfo.name,
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null
-    };
-
-    // Verificar se usuário já existe
-    const { data: existingUser, error: checkError } = await supabase
-      .from('users')
-      .select('id, google_id, email, name')
-      .eq('google_id', userInfo.id)
-      .single();
-
-    let user;
-    
-    if (checkError && checkError.code !== 'PGRST116') {
-      // Erro diferente de "não encontrado"
-      console.error('❌ Erro ao verificar usuário existente:');
-      console.error('Mensagem:', checkError.message);
-      console.error('Code:', checkError.code);
-      throw checkError;
-    }
-
-    if (existingUser) {
-      // Usuário existe, fazer update
-      console.log('🔄 Usuário já existe, atualizando...');
-      const { data: updatedUser, error: updateError } = await supabase
-        .from('users')
-        .update(userData)
-        .eq('google_id', userInfo.id)
-        .select()
-        .single();
-
-      if (updateError) {
-        console.error('❌ Erro ao atualizar usuário:');
-        console.error('Mensagem:', updateError.message);
-        console.error('Detalhes:', updateError.details);
-        console.error('Code:', updateError.code);
-        throw updateError;
-      }
-      
-      user = updatedUser;
-      console.log('✅ Usuário atualizado com sucesso:', user.id);
-    } else {
-      // Usuário não existe, fazer insert
-      console.log('➕ Usuário não existe, criando novo...');
-      const { data: newUser, error: insertError } = await supabase
-        .from('users')
-        .insert(userData)
-        .select()
-        .single();
-
-      if (insertError) {
-        console.error('❌ Erro ao criar usuário:');
-        console.error('Mensagem:', insertError.message);
-        console.error('Detalhes:', insertError.details);
-        console.error('Code:', insertError.code);
-        
-        // Se for erro de duplicata, tentar fazer update (race condition)
-        if (insertError.code === '23505' || insertError.message.includes('duplicate key')) {
-          console.log('⚠️ Duplicata detectada, tentando update...');
-          const { data: updatedUser, error: updateError } = await supabase
-            .from('users')
-            .update(userData)
-            .eq('google_id', userInfo.id)
-            .select()
-            .single();
-
-          if (updateError) {
-            console.error('❌ Erro ao atualizar após duplicata:');
-            console.error('Mensagem:', updateError.message);
-            throw updateError;
-          }
-          
-          user = updatedUser;
-          console.log('✅ Usuário atualizado após duplicata:', user.id);
-        } else {
-          throw insertError;
-        }
-      } else {
-        user = newUser;
-        console.log('✅ Usuário criado com sucesso:', user.id);
-      }
-    }
-
-    // Salvar na sessão
-    req.session.userId = user.id;
-    req.session.googleId = userInfo.id;
-    req.session.tokens = tokens;
-
-    console.log('Sessão criada com sucesso');
-
-    // Redirecionar para o frontend (já definido acima do try)
-    console.log('Redirecionando para:', frontendUrl);
-    res.redirect(`${frontendUrl}?auth=success`);
-  } catch (error) {
-    console.error('=== ERRO NO CALLBACK ===');
-    console.error('Tipo:', error.constructor.name);
-    console.error('Mensagem:', error.message);
-    console.error('Stack:', error.stack);
-    
-    res.redirect(`${frontendUrl}?auth=error&reason=callback_failed`);
+    return res.json({
+      authenticated: true,
+      user: {
+        id: profile.id,
+        email: profile.email,
+        name: profile.name,
+        role: profile.role
+      },
+      imageToken
+    });
+  } catch (err) {
+    console.error('Erro no login:', err);
+    return res.status(500).json({ error: 'Falha ao fazer login' });
   }
 });
 
 /**
  * GET /api/auth/status
- * Verifica status de autenticação
  */
 router.get('/status', async (req, res) => {
-  if (!req.session.userId) {
-    return res.json({ authenticated: false });
-  }
-
   try {
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('id, email, name, google_id')
-      .eq('id', req.session.userId)
-      .single();
+    const authHeader = req.headers.authorization;
+    let accessToken = null;
+    if (authHeader?.startsWith('Bearer ')) {
+      accessToken = authHeader.slice(7);
+    } else {
+      const cookies = (req.headers.cookie || '').split(';').reduce((acc, c) => {
+        const [k, ...v] = c.trim().split('=');
+        if (k) acc[k] = decodeURIComponent(v.join('='));
+        return acc;
+      }, {});
+      accessToken = cookies[SESSION_COOKIE] || null;
+    }
 
-    if (error) throw error;
+    if (!accessToken) {
+      return res.json({ authenticated: false });
+    }
 
-    res.json({
+    const { data: authData, error } = await supabase.auth.getUser(accessToken);
+    if (error || !authData.user) {
+      return res.json({ authenticated: false });
+    }
+
+    const profile = await loadAppUser(authData.user.id);
+    if (!profile) {
+      return res.json({ authenticated: false });
+    }
+
+    const imageToken = Buffer.from(profile.id, 'utf-8').toString('base64');
+    return res.json({
       authenticated: true,
       user: {
-        id: user.id,
-        email: user.email,
-        name: user.name
-      }
+        id: profile.id,
+        email: profile.email,
+        name: profile.name,
+        role: profile.role
+      },
+      imageToken
     });
-  } catch (error) {
-    console.error('Erro ao verificar status:', error);
-    res.status(500).json({ error: 'Falha ao verificar status de autenticação' });
+  } catch (err) {
+    console.error('Erro ao verificar status:', err);
+    return res.status(500).json({ error: 'Falha ao verificar status' });
   }
 });
 
 /**
  * POST /api/auth/logout
- * Faz logout do usuário
  */
 router.post('/logout', (req, res) => {
-  req.session.destroy((err) => {
-    if (err) {
-      console.error('Erro ao fazer logout:', err);
-      return res.status(500).json({ error: 'Falha ao fazer logout' });
+  clearAuthCookies(res);
+  if (req.session) {
+    req.session.destroy(() => {});
+  }
+  return res.json({ success: true });
+});
+
+/**
+ * POST /api/auth/users
+ * Admin cria usuário (Auth + app_users)
+ */
+router.post('/users', requireAdmin, async (req, res) => {
+  try {
+    const { email, password, name, role = 'viewer' } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: 'E-mail e senha são obrigatórios' });
     }
-    res.json({ success: true });
+    if (!['admin', 'viewer'].includes(role)) {
+      return res.status(400).json({ error: 'role deve ser admin ou viewer' });
+    }
+
+    const { data: created, error: createError } = await supabase.auth.admin.createUser({
+      email: String(email).trim().toLowerCase(),
+      password: String(password),
+      email_confirm: true,
+      user_metadata: { name: name || null }
+    });
+
+    if (createError || !created.user) {
+      return res.status(400).json({ error: createError?.message || 'Falha ao criar usuário' });
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from('app_users')
+      .insert({
+        id: created.user.id,
+        email: created.user.email,
+        name: name || null,
+        role
+      })
+      .select('id, email, name, role')
+      .single();
+
+    if (profileError) {
+      return res.status(500).json({ error: profileError.message });
+    }
+
+    return res.status(201).json({ user: profile });
+  } catch (err) {
+    console.error('Erro ao criar usuário:', err);
+    return res.status(500).json({ error: 'Falha ao criar usuário' });
+  }
+});
+
+/**
+ * GET /api/auth/users — lista perfis (admin)
+ */
+router.get('/users', requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('app_users')
+      .select('id, email, name, role, created_at')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    return res.json({ users: data || [] });
+  } catch (err) {
+    console.error('Erro ao listar usuários:', err);
+    return res.status(500).json({ error: 'Falha ao listar usuários' });
+  }
+});
+
+/**
+ * PUT /api/auth/users/:id — atualizar nome/role/senha
+ */
+router.put('/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, role, password } = req.body || {};
+
+    if (role !== undefined && !['admin', 'viewer'].includes(role)) {
+      return res.status(400).json({ error: 'role deve ser admin ou viewer' });
+    }
+    if (password !== undefined && String(password).length > 0 && String(password).length < 6) {
+      return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres' });
+    }
+
+    const authUpdate = {};
+    if (password) authUpdate.password = String(password);
+    if (name !== undefined) authUpdate.user_metadata = { name: name || null };
+
+    if (Object.keys(authUpdate).length > 0) {
+      const { error: authError } = await supabase.auth.admin.updateUserById(id, authUpdate);
+      if (authError) {
+        return res.status(400).json({ error: authError.message });
+      }
+    }
+
+    const profileUpdate = { updated_at: new Date().toISOString() };
+    if (name !== undefined) profileUpdate.name = name ? String(name).trim() : null;
+    if (role !== undefined) profileUpdate.role = role;
+
+    const { data: profile, error: profileError } = await supabase
+      .from('app_users')
+      .update(profileUpdate)
+      .eq('id', id)
+      .select('id, email, name, role, created_at')
+      .single();
+
+    if (profileError || !profile) {
+      return res.status(404).json({ error: profileError?.message || 'Usuário não encontrado' });
+    }
+
+    return res.json({ user: profile });
+  } catch (err) {
+    console.error('Erro ao atualizar usuário:', err);
+    return res.status(500).json({ error: 'Falha ao atualizar usuário' });
+  }
+});
+
+/**
+ * DELETE /api/auth/users/:id
+ */
+router.delete('/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (req.user?.id === id) {
+      return res.status(400).json({ error: 'Você não pode remover a si mesmo' });
+    }
+
+    const { error: deleteAuthError } = await supabase.auth.admin.deleteUser(id);
+    if (deleteAuthError) {
+      return res.status(400).json({ error: deleteAuthError.message });
+    }
+
+    await supabase.from('app_users').delete().eq('id', id);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Erro ao remover usuário:', err);
+    return res.status(500).json({ error: 'Falha ao remover usuário' });
+  }
+});
+
+// Compat: rotas antigas do Google OAuth
+router.get('/url', (_req, res) => {
+  res.status(410).json({
+    error: 'OAuth Google desativado. Use POST /api/auth/login com e-mail e senha.'
+  });
+});
+
+router.get('/callback', (_req, res) => {
+  res.status(410).json({
+    error: 'OAuth Google desativado. Use login com e-mail e senha.'
   });
 });
 

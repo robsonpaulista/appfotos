@@ -1,66 +1,62 @@
-import { google } from 'googleapis';
-import { oauth2Client } from '../config/google.config.js';
+import { getDriveClient, getDriveFolderId } from '../config/google.config.js';
 
 /**
- * Serviço para gerenciar pastas do Google Drive
+ * Serviço para gerenciar pastas do Google Drive (service account + pasta compartilhada)
  */
 class FolderService {
-  constructor() {
-    this.drive = google.drive({ version: 'v3', auth: oauth2Client });
+  async getDrive() {
+    return getDriveClient();
   }
 
   /**
-   * Lista todas as pastas do Google Drive
-   * @returns {Promise<Array>} Lista de pastas
+   * Lista pastas sob a pasta raiz configurada (DRIVE_FOLDER_ID)
    */
   async listFolders() {
     try {
-      const query = "mimeType='application/vnd.google-apps.folder' and trashed=false";
-      
-      const response = await this.drive.files.list({
-        q: query,
-        fields: 'files(id, name, parents, createdTime, modifiedTime)',
-        orderBy: 'name',
-        pageSize: 100
-      });
+      const drive = await this.getDrive();
+      const rootFolderId = getDriveFolderId();
+      const folderIds = await this.getAllSubfolderIds(rootFolderId);
 
-      return response.data.files || [];
+      const folders = [];
+      const rootInfo = await this.getFolderInfo(rootFolderId);
+      folders.push(rootInfo);
+
+      for (const id of folderIds) {
+        try {
+          folders.push(await this.getFolderInfo(id));
+        } catch {
+          // ignore pastas inacessíveis
+        }
+      }
+
+      return folders;
     } catch (error) {
       console.error('Erro ao listar pastas:', error.message);
       throw new Error(`Falha ao listar pastas: ${error.message}`);
     }
   }
 
-  /**
-   * Constrói árvore de pastas
-   * @param {Array} folders - Lista plana de pastas
-   * @returns {Array} Árvore de pastas
-   */
   buildFolderTree(folders) {
     const folderMap = new Map();
     const tree = [];
 
-    // Mapear todas as pastas
     folders.forEach(folder => {
       folderMap.set(folder.id, { ...folder, children: [] });
     });
 
-    // Construir hierarquia
     folders.forEach(folder => {
       const folderNode = folderMap.get(folder.id);
-      
+
       if (folder.parents && folder.parents.length > 0) {
         const parentId = folder.parents[0];
         const parent = folderMap.get(parentId);
-        
+
         if (parent) {
           parent.children.push(folderNode);
         } else {
-          // Se não encontrar pai, adiciona na raiz
           tree.push(folderNode);
         }
       } else {
-        // Pasta raiz
         tree.push(folderNode);
       }
     });
@@ -68,29 +64,23 @@ class FolderService {
     return tree;
   }
 
-  /**
-   * Lista fotos de uma pasta específica (incluindo subpastas)
-   * @param {string} folderId - ID da pasta
-   * @param {number} pageSize - Quantidade de itens
-   * @param {string} pageToken - Token de paginação
-   * @returns {Promise<Object>} Lista de arquivos e próximo token
-   */
   async listPhotosInFolder(folderId, pageSize = 100, pageToken = null) {
     try {
-      // Buscar todas as subpastas recursivamente
+      const drive = await this.getDrive();
       const folderIds = await this.getAllSubfolderIds(folderId);
-      folderIds.push(folderId); // Incluir a pasta principal
+      folderIds.push(folderId);
 
-      // Construir query para buscar fotos em todas as pastas
       const folderQuery = folderIds.map(id => `'${id}' in parents`).join(' or ');
       const query = `mimeType contains 'image/' and trashed = false and (${folderQuery})`;
-      
-      const response = await this.drive.files.list({
+
+      const response = await drive.files.list({
         pageSize,
-        pageToken,
+        pageToken: pageToken || undefined,
         q: query,
         fields: 'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, imageMediaMetadata, webContentLink, thumbnailLink, parents)',
-        orderBy: 'createdTime desc'
+        orderBy: 'createdTime desc',
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true
       });
 
       return {
@@ -103,25 +93,22 @@ class FolderService {
     }
   }
 
-  /**
-   * Obtém todos os IDs de subpastas recursivamente
-   * @param {string} folderId - ID da pasta pai
-   * @returns {Promise<Array>} Lista de IDs de subpastas
-   */
   async getAllSubfolderIds(folderId) {
     try {
+      const drive = await this.getDrive();
       const query = `'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-      
-      const response = await this.drive.files.list({
+
+      const response = await drive.files.list({
         q: query,
         fields: 'files(id)',
-        pageSize: 100
+        pageSize: 100,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true
       });
 
       const subfolders = response.data.files || [];
       let allSubfolderIds = subfolders.map(f => f.id);
 
-      // Recursivamente buscar subpastas das subpastas
       for (const subfolder of subfolders) {
         const nestedIds = await this.getAllSubfolderIds(subfolder.id);
         allSubfolderIds = allSubfolderIds.concat(nestedIds);
@@ -134,16 +121,13 @@ class FolderService {
     }
   }
 
-  /**
-   * Obtém informações de uma pasta específica
-   * @param {string} folderId - ID da pasta
-   * @returns {Promise<Object>} Informações da pasta
-   */
   async getFolderInfo(folderId) {
     try {
-      const response = await this.drive.files.get({
+      const drive = await this.getDrive();
+      const response = await drive.files.get({
         fileId: folderId,
-        fields: 'id, name, parents, createdTime, modifiedTime'
+        fields: 'id, name, parents, createdTime, modifiedTime',
+        supportsAllDrives: true
       });
 
       return response.data;
@@ -155,4 +139,3 @@ class FolderService {
 }
 
 export default new FolderService();
-

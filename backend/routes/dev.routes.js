@@ -1,23 +1,17 @@
 import express from 'express';
 import { supabase } from '../config/supabase.config.js';
+import { requireAdmin } from '../middleware/auth.js';
+import { getLibrarySourceId } from '../config/google.config.js';
 
 const router = express.Router();
-
-// Middleware para verificar autenticação
-const requireAuth = async (req, res, next) => {
-  if (!req.session.userId) {
-    return res.status(401).json({ error: 'Não autenticado' });
-  }
-  next();
-};
 
 /**
  * DELETE /api/dev/clear-all
  * ⚠️ APAGA TODOS OS METADADOS (apenas para desenvolvimento)
  */
-router.delete('/clear-all', requireAuth, async (req, res) => {
+router.delete('/clear-all', requireAdmin, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = getLibrarySourceId();
 
     // Verificar se realmente quer limpar
     const { confirm } = req.body;
@@ -88,9 +82,9 @@ router.delete('/clear-all', requireAuth, async (req, res) => {
  * GET /api/dev/stats
  * Retorna contagem de registros no banco
  */
-router.get('/stats', requireAuth, async (req, res) => {
+router.get('/stats', requireAdmin, async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = getLibrarySourceId();
 
     const { count: photosCount } = await supabase
       .from('photos')

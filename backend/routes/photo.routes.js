@@ -2,40 +2,10 @@ import express from 'express';
 import driveService from '../services/drive.service.js';
 import imageConversionService from '../services/imageConversion.service.js';
 import { supabase } from '../config/supabase.config.js';
-import { setCredentials } from '../config/google.config.js';
+import { getLibrarySourceId } from '../config/google.config.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
-
-// Middleware para verificar autenticação
-const requireAuth = async (req, res, next) => {
-  if (!req.session.userId) {
-    return res.status(401).json({ error: 'Não autenticado' });
-  }
-
-  try {
-    // Obter tokens do usuário
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('access_token, refresh_token, token_expiry')
-      .eq('id', req.session.userId)
-      .single();
-
-    if (error) throw error;
-
-    // Configurar credenciais para esta requisição
-    setCredentials({
-      access_token: user.access_token,
-      refresh_token: user.refresh_token,
-      expiry_date: new Date(user.token_expiry).getTime()
-    });
-
-    req.user = user;
-    next();
-  } catch (error) {
-    console.error('Erro na autenticação:', error);
-    res.status(401).json({ error: 'Sessão inválida' });
-  }
-};
 
 /**
  * GET /api/photos
@@ -61,7 +31,7 @@ router.get('/', requireAuth, async (req, res) => {
     let query = supabase
       .from('photos')
       .select('*', { count: 'exact' })
-      .eq('user_id', req.session.userId)
+      .eq('user_id', getLibrarySourceId())
       .order('created_at', { ascending: false });
 
     // Aplicar filtros
@@ -145,7 +115,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       .from('photos')
       .select('*')
       .eq('id', req.params.id)
-      .eq('user_id', req.session.userId)
+      .eq('user_id', getLibrarySourceId())
       .single();
 
     if (error) throw error;
@@ -174,7 +144,7 @@ router.get('/stream/:driveId', requireAuth, async (req, res) => {
       .from('photos')
       .select('id, mime_type, name')
       .eq('drive_id', driveId)
-      .eq('user_id', req.session.userId)
+      .eq('user_id', getLibrarySourceId())
       .single();
 
     if (error || !photo) {
@@ -222,7 +192,7 @@ router.get('/:id/image', requireAuth, async (req, res) => {
       .from('photos')
       .select('drive_id, mime_type, name')
       .eq('id', req.params.id)
-      .eq('user_id', req.session.userId)
+      .eq('user_id', getLibrarySourceId())
       .single();
 
     if (error || !photo) {
@@ -268,7 +238,7 @@ router.get('/:id/download', requireAuth, async (req, res) => {
       .from('photos')
       .select('*')
       .eq('id', req.params.id)
-      .eq('user_id', req.session.userId)
+      .eq('user_id', getLibrarySourceId())
       .single();
 
     if (error || !photo) {
@@ -335,7 +305,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       .from('photos')
       .update(updates)
       .eq('id', req.params.id)
-      .eq('user_id', req.session.userId)
+      .eq('user_id', getLibrarySourceId())
       .select()
       .single();
 
@@ -365,7 +335,7 @@ router.post('/:id/tags', requireAuth, async (req, res) => {
       .from('photos')
       .select('id')
       .eq('id', req.params.id)
-      .eq('user_id', req.session.userId)
+      .eq('user_id', getLibrarySourceId())
       .single();
 
     if (photoError || !photo) {
@@ -399,7 +369,7 @@ router.post('/:id/tags', requireAuth, async (req, res) => {
 router.get('/stats/summary', requireAuth, async (req, res) => {
   try {
     const { data: stats, error } = await supabase
-      .rpc('get_photo_stats', { p_user_id: req.session.userId });
+      .rpc('get_photo_stats', { p_user_id: getLibrarySourceId() });
 
     if (error) throw error;
 

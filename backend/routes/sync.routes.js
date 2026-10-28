@@ -1,44 +1,15 @@
 import express from 'express';
 import ingestService from '../services/ingest.service.js';
 import { supabase } from '../config/supabase.config.js';
-import { setCredentials } from '../config/google.config.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
-
-// Middleware para verificar autenticação
-const requireAuth = async (req, res, next) => {
-  if (!req.session.userId) {
-    return res.status(401).json({ error: 'Não autenticado' });
-  }
-
-  try {
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('access_token, refresh_token, token_expiry')
-      .eq('id', req.session.userId)
-      .single();
-
-    if (error) throw error;
-
-    setCredentials({
-      access_token: user.access_token,
-      refresh_token: user.refresh_token,
-      expiry_date: new Date(user.token_expiry).getTime()
-    });
-
-    req.user = user;
-    next();
-  } catch (error) {
-    console.error('Erro na autenticação:', error);
-    res.status(401).json({ error: 'Sessão inválida' });
-  }
-};
 
 /**
  * POST /api/sync/start
  * Inicia sincronização das fotos do Google Drive
  */
-router.post('/start', requireAuth, async (req, res) => {
+router.post('/start', requireAdmin, async (req, res) => {
   try {
     const { analyzeWithVision = false, folderId = null, tags = null } = req.body;
 
@@ -140,7 +111,7 @@ router.get('/history', requireAuth, async (req, res) => {
  * POST /api/sync/analyze
  * Analisa fotos ainda não processadas com Vision API
  */
-router.post('/analyze', requireAuth, async (req, res) => {
+router.post('/analyze', requireAdmin, async (req, res) => {
   try {
     const { limit = 100 } = req.body;
 
@@ -170,7 +141,7 @@ router.post('/analyze', requireAuth, async (req, res) => {
  * POST /api/sync/cancel
  * Cancela/reseta a sincronização em andamento
  */
-router.post('/cancel', requireAuth, async (req, res) => {
+router.post('/cancel', requireAdmin, async (req, res) => {
   try {
     const userId = req.session.userId;
 

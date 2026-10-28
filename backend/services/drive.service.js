@@ -1,31 +1,35 @@
-import { google } from 'googleapis';
-import { oauth2Client } from '../config/google.config.js';
-import stream from 'stream';
+import { getDriveClient, getDriveFolderId } from '../config/google.config.js';
+import folderService from './folder.service.js';
 
 /**
- * Serviço para interação com Google Drive API
+ * Serviço para interação com Google Drive API (service account)
  */
 class DriveService {
-  constructor() {
-    this.drive = google.drive({ version: 'v3', auth: oauth2Client });
+  async getDrive() {
+    return getDriveClient();
   }
 
   /**
-   * Lista arquivos de imagem do Google Drive
-   * @param {string} pageToken - Token para paginação
-   * @param {number} pageSize - Quantidade de itens por página
-   * @returns {Promise<Object>} Lista de arquivos e próximo pageToken
+   * Lista arquivos de imagem na pasta configurada (e subpastas)
    */
   async listPhotoFiles(pageToken = null, pageSize = 100) {
     try {
-      const query = "mimeType contains 'image/' and trashed = false";
-      
-      const response = await this.drive.files.list({
+      const drive = await this.getDrive();
+      const rootFolderId = getDriveFolderId();
+      const folderIds = await folderService.getAllSubfolderIds(rootFolderId);
+      folderIds.push(rootFolderId);
+
+      const folderQuery = folderIds.map(id => `'${id}' in parents`).join(' or ');
+      const query = `mimeType contains 'image/' and trashed = false and (${folderQuery})`;
+
+      const response = await drive.files.list({
         pageSize,
-        pageToken,
+        pageToken: pageToken || undefined,
         q: query,
-        fields: 'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, imageMediaMetadata, webContentLink, thumbnailLink)',
-        orderBy: 'createdTime desc'
+        fields: 'nextPageToken, files(id, name, mimeType, size, createdTime, modifiedTime, imageMediaMetadata, webContentLink, thumbnailLink, parents)',
+        orderBy: 'createdTime desc',
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true
       });
 
       return {
@@ -38,16 +42,13 @@ class DriveService {
     }
   }
 
-  /**
-   * Obtém metadados de um arquivo específico
-   * @param {string} fileId - ID do arquivo no Drive
-   * @returns {Promise<Object>} Metadados do arquivo
-   */
   async getFileMetadata(fileId) {
     try {
-      const response = await this.drive.files.get({
+      const drive = await this.getDrive();
+      const response = await drive.files.get({
         fileId,
-        fields: 'id, name, mimeType, size, createdTime, modifiedTime, imageMediaMetadata, thumbnailLink'
+        fields: 'id, name, mimeType, size, createdTime, modifiedTime, imageMediaMetadata, thumbnailLink',
+        supportsAllDrives: true
       });
 
       return response.data;
@@ -57,15 +58,11 @@ class DriveService {
     }
   }
 
-  /**
-   * Faz streaming de um arquivo do Drive
-   * @param {string} fileId - ID do arquivo
-   * @param {Object} res - Response object do Express
-   */
   async streamFile(fileId, res) {
     try {
-      const response = await this.drive.files.get(
-        { fileId, alt: 'media' },
+      const drive = await this.getDrive();
+      const response = await drive.files.get(
+        { fileId, alt: 'media', supportsAllDrives: true },
         { responseType: 'stream' }
       );
 
@@ -81,15 +78,11 @@ class DriveService {
     }
   }
 
-  /**
-   * Obtém conteúdo de um arquivo como buffer
-   * @param {string} fileId - ID do arquivo
-   * @returns {Promise<Buffer>} Conteúdo do arquivo
-   */
   async getFileContent(fileId) {
     try {
-      const response = await this.drive.files.get(
-        { fileId, alt: 'media' },
+      const drive = await this.getDrive();
+      const response = await drive.files.get(
+        { fileId, alt: 'media', supportsAllDrives: true },
         { responseType: 'arraybuffer' }
       );
 
@@ -100,11 +93,6 @@ class DriveService {
     }
   }
 
-  /**
-   * Obtém thumbnail de uma imagem
-   * @param {string} fileId - ID do arquivo
-   * @returns {Promise<string>} URL do thumbnail
-   */
   async getThumbnailUrl(fileId) {
     try {
       const metadata = await this.getFileMetadata(fileId);
@@ -115,11 +103,6 @@ class DriveService {
     }
   }
 
-  /**
-   * Extrai metadados de imagem (GPS, dimensões, etc)
-   * @param {Object} imageMediaMetadata - Metadados da imagem do Drive
-   * @returns {Object} Metadados processados
-   */
   extractImageMetadata(imageMediaMetadata) {
     if (!imageMediaMetadata) return {};
 

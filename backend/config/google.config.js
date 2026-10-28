@@ -2,64 +2,114 @@ import { google } from 'googleapis';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Carregar .env da raiz do projeto
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-export const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI
-);
-
-export const SCOPES = [
+const DRIVE_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/userinfo.profile',
-  'https://www.googleapis.com/auth/userinfo.email',
-  'https://www.googleapis.com/auth/cloud-vision'  // Necessário para Vision API
+  'https://www.googleapis.com/auth/cloud-vision'
 ];
 
-export const getAuthUrl = (redirectUri = null, frontendUrl = null) => {
-  // Se um redirect_uri customizado foi fornecido, criar um novo cliente OAuth2
-  const client = redirectUri 
-    ? new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        redirectUri
-      )
-    : oauth2Client;
-  
-  const authUrlParams = {
-    access_type: 'offline',
-    scope: SCOPES,
-    prompt: 'consent' // Força obter refresh token
-  };
-  
-  // Se um frontendUrl foi fornecido, adicionar como state para usar no callback
-  if (frontendUrl) {
-    authUrlParams.state = Buffer.from(JSON.stringify({ frontendUrl })).toString('base64');
+let googleAuth = null;
+
+/**
+ * ID da pasta raiz compartilhada no Drive (biblioteca de fotos)
+ */
+export function getDriveFolderId() {
+  const folderId = process.env.DRIVE_FOLDER_ID;
+  if (!folderId) {
+    throw new Error('DRIVE_FOLDER_ID não configurado. Defina o ID da pasta compartilhada com a service account.');
   }
-  
-  return client.generateAuthUrl(authUrlParams);
+  return folderId;
+}
+
+/**
+ * ID usado em photos.user_id para a biblioteca compartilhada
+ */
+export function getLibrarySourceId() {
+  return process.env.DRIVE_FOLDER_ID || 'library';
+}
+
+function loadServiceAccountCredentials() {
+  const jsonEnv = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (jsonEnv) {
+    try {
+      return JSON.parse(jsonEnv);
+    } catch {
+      throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON inválido (JSON malformado)');
+    }
+  }
+
+  const keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (keyFile) {
+    const resolved = path.isAbsolute(keyFile)
+      ? keyFile
+      : path.resolve(__dirname, '../..', keyFile);
+    if (!fs.existsSync(resolved)) {
+      throw new Error(`Arquivo de service account não encontrado: ${resolved}`);
+    }
+    return JSON.parse(fs.readFileSync(resolved, 'utf8'));
+  }
+
+  throw new Error(
+    'Service account não configurada. Defina GOOGLE_SERVICE_ACCOUNT_JSON ou GOOGLE_APPLICATION_CREDENTIALS.'
+  );
+}
+
+/**
+ * GoogleAuth com service account (Drive + Vision)
+ */
+export function getGoogleAuth() {
+  if (googleAuth) return googleAuth;
+
+  const credentials = loadServiceAccountCredentials();
+  googleAuth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: DRIVE_SCOPES
+  });
+
+  return googleAuth;
+}
+
+/**
+ * Cliente Drive autenticado com service account
+ */
+export async function getDriveClient() {
+  const auth = getGoogleAuth();
+  return google.drive({ version: 'v3', auth });
+}
+
+/**
+ * Access token da service account (ex.: Vision API REST)
+ */
+export async function getServiceAccessToken() {
+  const auth = getGoogleAuth();
+  const client = await auth.getClient();
+  const tokenResponse = await client.getAccessToken();
+  const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token;
+  if (!token) {
+    throw new Error('Não foi possível obter access token da service account');
+  }
+  return token;
+}
+
+/** @deprecated Use getDriveClient / getGoogleAuth — mantido só para imports legados */
+export const oauth2Client = {
+  async getAccessToken() {
+    const token = await getServiceAccessToken();
+    return { token };
+  },
+  setCredentials() {
+    console.warn('setCredentials ignorado: Drive usa service account');
+  }
 };
 
-export const getTokensFromCode = async (code, redirectUri = null) => {
-  const client = redirectUri 
-    ? new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        redirectUri
-      )
-    : oauth2Client;
-  
-  const { tokens } = await client.getToken(code);
-  return tokens;
+export const setCredentials = () => {
+  console.warn('setCredentials ignorado: Drive usa service account');
 };
 
-export const setCredentials = (tokens) => {
-  oauth2Client.setCredentials(tokens);
-};
-
+export const SCOPES = DRIVE_SCOPES;
