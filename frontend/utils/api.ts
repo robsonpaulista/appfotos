@@ -308,33 +308,53 @@ class ApiClient {
     return data;
   }
 
-  async indexLibraryFaces(limit: number = 30): Promise<{
+  /**
+   * Indexa rostos chamando o Render direto (1 foto por vez).
+   * Evita o timeout do proxy Vercel (~10–60s); Face-API + cold start passa disso.
+   */
+  async indexLibraryFaces(limit: number = 15): Promise<{
     processed: number;
     facesTotal: number;
     message?: string;
   }> {
-    // Vercel hobby corta o proxy ~10s — lotes pequenos no Express
-    const batchSize = 3;
+    const [{ data: status }, { data: tokenData }] = await Promise.all([
+      this.client.get('/api/faces/backend-status'),
+      this.client.get('/api/auth/access-token'),
+    ]);
+
+    if (!status?.ok || !status?.backend) {
+      throw new Error(
+        status?.message ||
+          'BACKEND_URL não configurada ou Render offline. Defina BACKEND_URL=https://appfotos.onrender.com no Vercel.'
+      );
+    }
+
+    const accessToken = tokenData?.accessToken as string | undefined;
+    if (!accessToken) {
+      throw new Error('Sessão sem token. Faça login de novo.');
+    }
+
+    const backend = String(status.backend).replace(/\/$/, '');
     let processed = 0;
     let facesTotal = 0;
-    let rounds = 0;
-    const maxRounds = Math.ceil(limit / batchSize);
+    const maxRounds = Math.min(Math.max(limit, 1), 20);
 
-    while (rounds < maxRounds) {
-      const { data } = await this.client.post(
-        '/api/faces/index-library',
-        { limit: batchSize },
-        { timeout: 55000 }
+    for (let round = 0; round < maxRounds; round++) {
+      const { data } = await axios.post(
+        `${backend}/api/faces/index-library`,
+        { limit: 1 },
+        {
+          timeout: 120000,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
       );
 
-      if (data && typeof data === 'object' && 'error' in data && data.error) {
-        const errVal = (data as { error: unknown }).error;
+      if (data?.error) {
         throw new Error(
-          typeof errVal === 'string'
-            ? errVal
-            : errVal && typeof errVal === 'object' && 'message' in (errVal as object)
-              ? String((errVal as { message: unknown }).message)
-              : 'Falha ao indexar rostos'
+          typeof data.error === 'string' ? data.error : JSON.stringify(data.error)
         );
       }
 
@@ -342,9 +362,7 @@ class ApiClient {
       const batchFaces = Number(data?.facesTotal) || 0;
       processed += batchProcessed;
       facesTotal += batchFaces;
-      rounds += 1;
 
-      // Nada pendente neste lote → acervo já indexado o suficiente
       if (batchProcessed === 0) break;
     }
 
@@ -354,7 +372,7 @@ class ApiClient {
       message:
         processed === 0
           ? 'Nenhuma foto pendente de indexação neste lote.'
-          : `${processed} foto(s) indexada(s), ${facesTotal} rosto(s). Continue clicando se ainda houver fotos novas.`,
+          : `${processed} foto(s) indexada(s), ${facesTotal} rosto(s). Clique de novo se ainda houver fotos novas.`,
     };
   }
 
