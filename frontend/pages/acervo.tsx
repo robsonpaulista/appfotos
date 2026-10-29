@@ -126,11 +126,12 @@ export default function AcervoPage() {
                 Gestão
               </p>
               <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
-                {pagination.total} {pagination.total === 1 ? 'foto' : 'fotos'}
+                {pagination?.total ?? 0}{' '}
+                {(pagination?.total ?? 0) === 1 ? 'foto' : 'fotos'}
               </h1>
-              {pagination.total > 0 && (
+              {(pagination?.total ?? 0) > 0 && (
                 <p className="mt-1 text-sm text-ink/50">
-                  Página {pagination.page} de {pagination.totalPages}
+                  Página {pagination?.page ?? 1} de {pagination?.totalPages ?? 1}
                 </p>
               )}
             </div>
@@ -179,7 +180,7 @@ export default function AcervoPage() {
 
           {indexMessage && (
             <div className="border border-ink/10 bg-primary-500/15 px-4 py-3 text-sm text-ink/70">
-              {indexMessage}
+              {typeof indexMessage === 'string' ? indexMessage : String(indexMessage)}
             </div>
           )}
 

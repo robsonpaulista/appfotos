@@ -317,94 +317,122 @@ class ApiClient {
     facesTotal: number;
     message?: string;
   }> {
-    const [{ data: status }, { data: tokenData }] = await Promise.all([
-      this.client.get('/api/faces/backend-status'),
-      this.client.get('/api/auth/access-token'),
-    ]);
-
-    if (!status?.ok || !status?.backend) {
-      throw new Error(
-        status?.message ||
-          'BACKEND_URL não configurada ou Render offline. Defina BACKEND_URL=https://appfotos.onrender.com no Vercel.'
-      );
-    }
-
-    const accessToken = tokenData?.accessToken as string | undefined;
-    if (!accessToken) {
-      throw new Error('Sessão sem token. Faça login de novo.');
-    }
-
-    const backend = String(status.backend).replace(/\/$/, '');
-    let processed = 0;
-    let facesTotal = 0;
-    const maxRounds = Math.min(Math.max(limit, 1), 20);
-
-    const postOne = async () =>
-      axios.post(
-        `${backend}/api/faces/index-library`,
-        { limit: 1 },
-        {
-          timeout: 180000,
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
-
-    for (let round = 0; round < maxRounds; round++) {
-      let data: {
-        error?: unknown;
-        processed?: number;
-        facesTotal?: number;
+    const asError = (value: unknown, fallback: string): Error => {
+      if (value instanceof Error) return new Error(value.message || fallback);
+      if (typeof value === 'string' && value.trim()) return new Error(value);
+      const ax = value as {
+        message?: string;
+        response?: { data?: { error?: unknown; message?: unknown }; status?: number };
       };
-      try {
-        ({ data } = await postOne());
-      } catch (err: unknown) {
-        const ax = err as { message?: string; code?: string };
-        const isNetwork =
-          ax.code === 'ERR_NETWORK' ||
-          /network error/i.test(ax.message || '');
-        if (!isNetwork) throw err;
-
-        // Acorda o Render Free e tenta 1 vez de novo
+      const fromBody = ax.response?.data?.error ?? ax.response?.data?.message;
+      if (typeof fromBody === 'string' && fromBody.trim()) {
+        return new Error(fromBody);
+      }
+      if (fromBody && typeof fromBody === 'object') {
         try {
-          await axios.get(`${backend}/health`, { timeout: 60000 });
+          return new Error(JSON.stringify(fromBody));
         } catch {
-          /* ignore */
-        }
-        await new Promise((r) => setTimeout(r, 2000));
-        try {
-          ({ data } = await postOne());
-        } catch {
-          throw new Error(
-            'Network Error ao falar com o Render. Abra https://appfotos.onrender.com/health, espere carregar e clique de novo em Indexar. No plano Free a instância pode reiniciar com fotos grandes.'
-          );
+          /* fall through */
         }
       }
+      if (typeof ax.message === 'string' && ax.message.trim()) {
+        return new Error(ax.message);
+      }
+      return new Error(fallback);
+    };
 
-      if (data?.error) {
+    try {
+      const [{ data: status }, { data: tokenData }] = await Promise.all([
+        this.client.get('/api/faces/backend-status'),
+        this.client.get('/api/auth/access-token'),
+      ]);
+
+      if (!status?.ok || !status?.backend) {
         throw new Error(
-          typeof data.error === 'string' ? data.error : JSON.stringify(data.error)
+          (typeof status?.message === 'string' && status.message) ||
+            'BACKEND_URL não configurada ou Render offline. Defina BACKEND_URL=https://appfotos.onrender.com no Vercel.'
         );
       }
 
-      const batchProcessed = Number(data?.processed) || 0;
-      const batchFaces = Number(data?.facesTotal) || 0;
-      processed += batchProcessed;
-      facesTotal += batchFaces;
+      const accessToken = tokenData?.accessToken as string | undefined;
+      if (!accessToken) {
+        throw new Error('Sessão sem token. Faça login de novo.');
+      }
 
-      if (batchProcessed === 0) break;
+      const backend = String(status.backend).replace(/\/$/, '');
+      let processed = 0;
+      let facesTotal = 0;
+      const maxRounds = Math.min(Math.max(limit, 1), 20);
+
+      const postOne = async () =>
+        axios.post(
+          `${backend}/api/faces/index-library`,
+          { limit: 1 },
+          {
+            timeout: 180000,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }
+        );
+
+      for (let round = 0; round < maxRounds; round++) {
+        let data: {
+          error?: unknown;
+          processed?: number;
+          facesTotal?: number;
+        };
+        try {
+          ({ data } = await postOne());
+        } catch (err: unknown) {
+          const ax = err as { message?: string; code?: string };
+          const isNetwork =
+            ax.code === 'ERR_NETWORK' ||
+            /network error/i.test(ax.message || '');
+          if (!isNetwork) throw asError(err, 'Falha ao indexar rostos no Render');
+
+          try {
+            await axios.get(`${backend}/health`, { timeout: 60000 });
+          } catch {
+            /* ignore */
+          }
+          await new Promise((r) => setTimeout(r, 2000));
+          try {
+            ({ data } = await postOne());
+          } catch (retryErr: unknown) {
+            throw asError(
+              retryErr,
+              'Network Error ao falar com o Render. Abra https://appfotos.onrender.com/health, espere carregar e clique de novo em Indexar.'
+            );
+          }
+        }
+
+        if (data?.error) {
+          throw new Error(
+            typeof data.error === 'string' ? data.error : JSON.stringify(data.error)
+          );
+        }
+
+        const batchProcessed = Number(data?.processed) || 0;
+        const batchFaces = Number(data?.facesTotal) || 0;
+        processed += batchProcessed;
+        facesTotal += batchFaces;
+
+        if (batchProcessed === 0) break;
+      }
+
+      return {
+        processed,
+        facesTotal,
+        message:
+          processed === 0
+            ? 'Nenhuma foto pendente de indexação neste lote.'
+            : `${processed} foto(s) indexada(s), ${facesTotal} rosto(s). Clique de novo se ainda houver fotos novas.`,
+      };
+    } catch (err: unknown) {
+      throw asError(err, 'Falha ao indexar rostos');
     }
-
-    return {
-      processed,
-      facesTotal,
-      message:
-        processed === 0
-          ? 'Nenhuma foto pendente de indexação neste lote.'
-          : `${processed} foto(s) indexada(s), ${facesTotal} rosto(s). Clique de novo se ainda houver fotos novas.`,
-    };
   }
 
   // Leaders CRUD (Next.js / Supabase — funciona no Vercel)

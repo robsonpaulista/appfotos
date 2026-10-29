@@ -24,8 +24,13 @@ export function usePhotos(initialFilters: PhotoFilters = {}, enabled: boolean = 
       setLoading(true);
       setError(null);
       const response: PhotosResponse = await api.getPhotos({ ...filters, page: pagination.page });
-      setPhotos(response.photos);
-      setPagination(response.pagination);
+      setPhotos(Array.isArray(response?.photos) ? response.photos : []);
+      setPagination({
+        page: response?.pagination?.page ?? 1,
+        limit: response?.pagination?.limit ?? 50,
+        total: response?.pagination?.total ?? 0,
+        totalPages: response?.pagination?.totalPages ?? 0,
+      });
     } catch (err) {
       console.error('Erro ao carregar fotos:', err);
       setError('Falha ao carregar fotos');
