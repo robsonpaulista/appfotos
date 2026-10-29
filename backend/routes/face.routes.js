@@ -66,7 +66,11 @@ router.post('/search-by-image', requireAuth, upload.single('image'), async (req,
  */
 router.post('/search-by-leader', requireAuth, async (req, res) => {
   try {
-    const { leaderId, threshold = 0.5 } = req.body || {};
+    const leaderId = req.body?.leaderId;
+    // 0.58: mais fotos do líder; 0.7 misturava outras pessoas
+    const threshold = req.body?.threshold != null
+      ? parseFloat(req.body.threshold)
+      : 0.58;
     if (!leaderId) {
       return res.status(400).json({ error: 'leaderId é obrigatório' });
     }
@@ -87,7 +91,7 @@ router.post('/search-by-leader', requireAuth, async (req, res) => {
 
     const result = await faceRecognitionService.searchArchiveByDescriptor(
       leader.face_vector,
-      threshold,
+      Number.isFinite(threshold) ? threshold : 0.58,
       getLibrarySourceId()
     );
 
