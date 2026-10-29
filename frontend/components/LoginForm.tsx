@@ -90,7 +90,7 @@ export function LoginForm({
   }
 
   const fieldClass = isEmbedded
-    ? 'w-full border-0 border-b border-ink/25 bg-transparent px-0 py-3 text-[15px] text-ink outline-none transition-colors placeholder:text-ink/35 focus:border-ink'
+    ? 'login-field-embedded w-full border-0 border-b border-ink/25 bg-transparent px-0 py-3 text-[15px] text-ink outline-none transition-colors placeholder:text-ink/35 focus:border-ink'
     : isGlass
       ? 'w-full border border-ink/15 bg-white/55 px-4 py-3 text-[15px] text-ink outline-none transition-colors placeholder:text-ink/35 backdrop-blur-sm focus:border-ink/35 focus:bg-white/75'
       : 'w-full border border-ink/12 bg-white px-4 py-3 text-[15px] text-ink outline-none transition-colors placeholder:text-ink/30 focus:border-primary-600 focus:ring-2 focus:ring-primary-500/25';

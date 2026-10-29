@@ -42,4 +42,16 @@
     mix-blend-mode: overlay;
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
+
+  /* Chrome/Safari autofill pinta o input de branco — manter amarelo do splash */
+  .login-field-embedded:-webkit-autofill,
+  .login-field-embedded:-webkit-autofill:hover,
+  .login-field-embedded:-webkit-autofill:focus,
+  .login-field-embedded:-webkit-autofill:active {
+    -webkit-text-fill-color: #0c0b09 !important;
+    caret-color: #0c0b09;
+    transition: background-color 99999s ease-in-out 0s;
+    box-shadow: 0 0 0 1000px #f5b800 inset !important;
+    -webkit-box-shadow: 0 0 0 1000px #f5b800 inset !important;
+  }
 }
