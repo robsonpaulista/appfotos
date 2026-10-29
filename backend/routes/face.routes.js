@@ -116,20 +116,36 @@ router.post('/search-by-leader', requireAuth, async (req, res) => {
 
 /**
  * POST /api/faces/index-library
- * Admin: indexa rostos de fotos ainda sem descritores (lote)
+ * Admin: indexa rostos (modo rápido). Marca analyzed=true mesmo com 0 rostos
+ * para não reprocessar a mesma foto e estourar 504 no Cloudflare/Render.
  */
 router.post('/index-library', requireAdmin, async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.body?.limit || '30', 10), 100);
+    const limit = Math.min(parseInt(req.body?.limit || '1', 10), 5);
     const libraryId = getLibrarySourceId();
 
-    const { data: photos, error } = await supabase
+    // Preferir fotos ainda não analisadas (evita loop nas mesmas sem rosto)
+    let { data: photos, error } = await supabase
       .from('photos')
-      .select('id, drive_id, mime_type')
+      .select('id, drive_id, mime_type, analyzed')
       .eq('user_id', libraryId)
-      .limit(limit * 3);
+      .or('analyzed.is.null,analyzed.eq.false')
+      .order('created_at', { ascending: false })
+      .limit(limit * 5);
 
     if (error) throw error;
+
+    // Fallback: sem coluna/filtro útil, pega lote e filtra por descritor
+    if (!photos?.length) {
+      const again = await supabase
+        .from('photos')
+        .select('id, drive_id, mime_type, analyzed')
+        .eq('user_id', libraryId)
+        .order('created_at', { ascending: false })
+        .limit(limit * 5);
+      if (again.error) throw again.error;
+      photos = again.data || [];
+    }
 
     const results = [];
     let processed = 0;
@@ -143,19 +159,38 @@ router.post('/index-library', requireAdmin, async (req, res) => {
         .select('*', { count: 'exact', head: true })
         .eq('photo_id', photo.id);
 
-      if ((count || 0) > 0) continue;
+      if ((count || 0) > 0) {
+        await supabase.from('photos').update({ analyzed: true }).eq('id', photo.id);
+        continue;
+      }
+
+      if (photo.analyzed === true) continue;
 
       try {
         const imageBuffer = await driveService.getFileContent(photo.drive_id);
-        const detections = await faceRecognitionService.detectFaces(imageBuffer, photo.mime_type);
+        const detections = await faceRecognitionService.detectFaces(
+          imageBuffer,
+          photo.mime_type,
+          { fast: true }
+        );
         if (detections.length > 0) {
           await faceRecognitionService.saveFaceDescriptors(photo.id, detections);
           facesTotal += detections.length;
         }
+        // Marca como analisada mesmo com 0 rostos — senão a mesma foto trava o lote
+        await supabase.from('photos').update({ analyzed: true }).eq('id', photo.id);
+
         results.push({ photoId: photo.id, facesDetected: detections.length });
         processed++;
       } catch (err) {
         console.error(`Erro ao indexar ${photo.id}:`, err.message);
+        try {
+          await supabase.from('photos').update({ analyzed: true }).eq('id', photo.id);
+          processed++;
+          results.push({ photoId: photo.id, facesDetected: 0, error: err.message });
+        } catch {
+          /* ignore */
+        }
       }
     }
 
@@ -165,7 +200,7 @@ router.post('/index-library', requireAdmin, async (req, res) => {
       results,
       message: processed === 0
         ? 'Nenhuma foto pendente de indexação neste lote.'
-        : `${processed} foto(s) indexada(s), ${facesTotal} rosto(s).`
+        : `${processed} foto(s) analisada(s), ${facesTotal} rosto(s) indexado(s).`
     });
   } catch (error) {
     console.error('Erro ao indexar biblioteca:', error);

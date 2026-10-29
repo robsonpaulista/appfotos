@@ -57,16 +57,22 @@ class FaceRecognitionService {
    * @param {string} mimeType - Tipo MIME da imagem
    * @returns {Promise<Array>} Array de detecções com descritores
    */
-  async detectFaces(imageBuffer, mimeType = 'image/jpeg') {
+  /**
+   * @param {Buffer} imageBuffer
+   * @param {string} mimeType
+   * @param {{ fast?: boolean }} [options] - fast=true para indexação no Render Free (evita 504)
+   */
+  async detectFaces(imageBuffer, mimeType = 'image/jpeg', options = {}) {
     if (!this.modelsLoaded) {
       await this.loadModels();
     }
 
+    const fast = Boolean(options.fast);
+
     try {
       let processedBuffer = imageBuffer;
 
-      // Converter HEIC para JPEG se necessário
-      const isHEIC = mimeType?.toLowerCase().includes('heif') || 
+      const isHEIC = mimeType?.toLowerCase().includes('heif') ||
                      mimeType?.toLowerCase().includes('heic');
 
       if (isHEIC) {
@@ -74,16 +80,17 @@ class FaceRecognitionService {
         processedBuffer = await imageConversionService.convertHEICtoJPEG(imageBuffer, 'temp');
       }
 
-      // Render Free (~512MB): imagens 4K derrubam o processo → Network Error no browser
+      // fast: 800px (indexação); normal: 1280px
+      const maxPx = fast ? 800 : 1280;
       try {
         const meta = await sharp(processedBuffer).metadata();
         const maxSide = Math.max(meta.width || 0, meta.height || 0);
-        if (maxSide > 1280) {
-          console.log(`  📐 Redimensionando ${meta.width}x${meta.height} → máx 1280px`);
+        if (maxSide > maxPx) {
+          console.log(`  📐 Redimensionando ${meta.width}x${meta.height} → máx ${maxPx}px`);
           processedBuffer = await sharp(processedBuffer)
             .rotate()
-            .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 85 })
+            .resize(maxPx, maxPx, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: fast ? 80 : 85 })
             .toBuffer();
         }
       } catch (resizeErr) {
@@ -91,17 +98,20 @@ class FaceRecognitionService {
       }
 
       const img = await canvas.loadImage(processedBuffer);
-      
-      // Configuração mais sensível para detectar rostos menores
-      const detections = await faceapi
-        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({
-          inputSize: 512, // resolução maior para rostos distantes
-          scoreThreshold: 0.35 // aumenta sensibilidade
-        }))
-        .withFaceLandmarks()
-        .withFaceDescriptors()
-        .withFaceExpressions();
 
+      let chain = faceapi.detectAllFaces(
+        img,
+        new faceapi.TinyFaceDetectorOptions({
+          inputSize: fast ? 416 : 512,
+          scoreThreshold: fast ? 0.4 : 0.35,
+        })
+      ).withFaceLandmarks().withFaceDescriptors();
+
+      if (!fast) {
+        chain = chain.withFaceExpressions();
+      }
+
+      const detections = await chain;
       console.log(`  📊 Detectados ${detections.length} rosto(s) na imagem ${img.width}x${img.height}px`);
 
       if (detections.length > 0) {
@@ -113,12 +123,12 @@ class FaceRecognitionService {
         }));
       }
 
-      console.log('  ⚠️ Nenhum rosto detectado, tentando fallback com TinyFaceDetector (config padrão)');
-
+      // Indexação rápida: um único fallback curto (sem SSD — modelo ausente no deploy)
+      console.log('  ⚠️ Nenhum rosto, fallback TinyFace 320…');
       const fallbackDetections = await faceapi
         .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({
           inputSize: 320,
-          scoreThreshold: 0.5,
+          scoreThreshold: 0.45,
         }))
         .withFaceLandmarks()
         .withFaceDescriptors();
@@ -131,9 +141,8 @@ class FaceRecognitionService {
         }));
       }
 
-      console.log('  ⚠️ Tentando fallback com SSD Mobilenet...');
-
-      if (faceapi.nets.ssdMobilenetv1.params) {
+      if (!fast && faceapi.nets.ssdMobilenetv1.params) {
+        console.log('  ⚠️ Tentando fallback com SSD Mobilenet...');
         const ssdDetections = await faceapi
           .detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
           .withFaceLandmarks()
@@ -146,12 +155,9 @@ class FaceRecognitionService {
             descriptor: Array.from(detection.descriptor),
           }));
         }
-      } else {
-        console.warn('  ⚠️ Modelo SSD Mobilenet não carregado. Pulando fallback SSD.');
       }
 
-      console.log('  ❌ Fallbacks não detectaram rostos.');
-
+      console.log('  ❌ Nenhum rosto detectado.');
       return [];
     } catch (error) {
       console.error('Erro ao detectar rostos:', error);

@@ -362,14 +362,15 @@ class ApiClient {
       const backend = String(status.backend).replace(/\/$/, '');
       let processed = 0;
       let facesTotal = 0;
-      const maxRounds = Math.min(Math.max(limit, 1), 20);
+      const maxRounds = Math.min(Math.max(limit, 1), 10);
 
       const postOne = async () =>
         axios.post(
           `${backend}/api/faces/index-library`,
           { limit: 1 },
           {
-            timeout: 180000,
+            // Cloudflare/Render costuma cortar ~100s → 504; modo fast no backend deve caber
+            timeout: 90000,
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${accessToken}`,
@@ -386,7 +387,17 @@ class ApiClient {
         try {
           ({ data } = await postOne());
         } catch (err: unknown) {
-          const ax = err as { message?: string; code?: string };
+          const ax = err as {
+            message?: string;
+            code?: string;
+            response?: { status?: number };
+          };
+          const status = ax.response?.status;
+          if (status === 504 || status === 502) {
+            throw new Error(
+              `Timeout ${status} no Render (foto pesada ou cold start). Clique de novo em Indexar — fotos já analisadas são puladas.`
+            );
+          }
           const isNetwork =
             ax.code === 'ERR_NETWORK' ||
             /network error/i.test(ax.message || '');
@@ -403,10 +414,13 @@ class ApiClient {
           } catch (retryErr: unknown) {
             throw asError(
               retryErr,
-              'Network Error ao falar com o Render. Abra https://appfotos.onrender.com/health, espere carregar e clique de novo em Indexar.'
+              'Falha de rede com o Render. Abra https://appfotos.onrender.com/health e tente de novo.'
             );
           }
         }
+
+        // 504 = gateway cortou (foto lenta). Segue para a próxima no próximo clique.
+        // Já tratamos via asError abaixo se não for network.
 
         if (data?.error) {
           throw new Error(
