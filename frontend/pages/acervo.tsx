@@ -71,11 +71,15 @@ export default function AcervoPage() {
         response?: { data?: { error?: unknown; message?: unknown } };
         message?: string;
       };
+      const status = ax.response?.status;
+      const detail = toMessage(
+        ax.response?.data?.error ?? ax.response?.data?.message ?? ax.message,
+        'Falha ao indexar rostos.'
+      );
       setIndexMessage(
-        toMessage(
-          ax.response?.data?.error ?? ax.response?.data?.message ?? ax.message,
-          'Falha ao indexar rostos. Confira BACKEND_URL no Vercel e se o Render está no ar (/health).'
-        )
+        status === 502 || status === 503
+          ? `${detail} Abra /api/faces/backend-status (logado) para diagnosticar, ou o /health do Render.`
+          : detail
       );
     } finally {
       setIndexing(false);
