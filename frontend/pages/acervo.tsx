@@ -68,7 +68,10 @@ export default function AcervoPage() {
       );
     } catch (err: unknown) {
       const ax = err as {
-        response?: { data?: { error?: unknown; message?: unknown } };
+        response?: {
+          status?: number;
+          data?: { error?: unknown; message?: unknown };
+        };
         message?: string;
       };
       const status = ax.response?.status;
