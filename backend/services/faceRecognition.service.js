@@ -1,5 +1,6 @@
 import * as faceapi from 'face-api.js';
 import canvas from 'canvas';
+import sharp from 'sharp';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { supabase } from '../config/supabase.config.js';
@@ -71,6 +72,22 @@ class FaceRecognitionService {
       if (isHEIC) {
         console.log('  🔄 Convertendo HEIC para JPEG...');
         processedBuffer = await imageConversionService.convertHEICtoJPEG(imageBuffer, 'temp');
+      }
+
+      // Render Free (~512MB): imagens 4K derrubam o processo → Network Error no browser
+      try {
+        const meta = await sharp(processedBuffer).metadata();
+        const maxSide = Math.max(meta.width || 0, meta.height || 0);
+        if (maxSide > 1280) {
+          console.log(`  📐 Redimensionando ${meta.width}x${meta.height} → máx 1280px`);
+          processedBuffer = await sharp(processedBuffer)
+            .rotate()
+            .resize(1280, 1280, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 85 })
+            .toBuffer();
+        }
+      } catch (resizeErr) {
+        console.warn('  ⚠️ Resize Sharp falhou, usando buffer original:', resizeErr?.message || resizeErr);
       }
 
       const img = await canvas.loadImage(processedBuffer);

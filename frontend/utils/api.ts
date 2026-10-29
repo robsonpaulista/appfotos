@@ -339,18 +339,49 @@ class ApiClient {
     let facesTotal = 0;
     const maxRounds = Math.min(Math.max(limit, 1), 20);
 
-    for (let round = 0; round < maxRounds; round++) {
-      const { data } = await axios.post(
+    const postOne = async () =>
+      axios.post(
         `${backend}/api/faces/index-library`,
         { limit: 1 },
         {
-          timeout: 120000,
+          timeout: 180000,
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${accessToken}`,
           },
         }
       );
+
+    for (let round = 0; round < maxRounds; round++) {
+      let data: {
+        error?: unknown;
+        processed?: number;
+        facesTotal?: number;
+      };
+      try {
+        ({ data } = await postOne());
+      } catch (err: unknown) {
+        const ax = err as { message?: string; code?: string };
+        const isNetwork =
+          ax.code === 'ERR_NETWORK' ||
+          /network error/i.test(ax.message || '');
+        if (!isNetwork) throw err;
+
+        // Acorda o Render Free e tenta 1 vez de novo
+        try {
+          await axios.get(`${backend}/health`, { timeout: 60000 });
+        } catch {
+          /* ignore */
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+        try {
+          ({ data } = await postOne());
+        } catch {
+          throw new Error(
+            'Network Error ao falar com o Render. Abra https://appfotos.onrender.com/health, espere carregar e clique de novo em Indexar. No plano Free a instância pode reiniciar com fotos grandes.'
+          );
+        }
+      }
 
       if (data?.error) {
         throw new Error(
