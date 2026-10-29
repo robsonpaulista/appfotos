@@ -40,21 +40,42 @@ export default function AcervoPage() {
     router.push(`/photo/${photo.id}`);
   };
 
+  const toMessage = (value: unknown, fallback: string): string => {
+    if (typeof value === 'string' && value.trim()) return value;
+    if (value && typeof value === 'object') {
+      const obj = value as Record<string, unknown>;
+      if (typeof obj.message === 'string') return obj.message;
+      if (typeof obj.error === 'string') return obj.error;
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return fallback;
+      }
+    }
+    return fallback;
+  };
+
   const handleIndexFaces = async () => {
     setIndexing(true);
     setIndexMessage(null);
     try {
-      const result = await api.indexLibraryFaces(30);
-      setIndexMessage(result.message || `${result.processed} foto(s), ${result.facesTotal} rosto(s).`);
+      const result = await api.indexLibraryFaces(15);
+      setIndexMessage(
+        toMessage(
+          result.message,
+          `${result.processed ?? 0} foto(s), ${result.facesTotal ?? 0} rosto(s).`
+        )
+      );
     } catch (err: unknown) {
       const ax = err as {
-        response?: { data?: { error?: string } };
+        response?: { data?: { error?: unknown; message?: unknown } };
         message?: string;
       };
       setIndexMessage(
-        ax.response?.data?.error ||
-          ax.message ||
-          'Falha ao indexar rostos. Em produção, configure BACKEND_URL no Vercel (Express com Face-API).'
+        toMessage(
+          ax.response?.data?.error ?? ax.response?.data?.message ?? ax.message,
+          'Falha ao indexar rostos. Confira BACKEND_URL no Vercel e se o Render está no ar (/health).'
+        )
       );
     } finally {
       setIndexing(false);

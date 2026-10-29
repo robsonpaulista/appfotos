@@ -313,8 +313,49 @@ class ApiClient {
     facesTotal: number;
     message?: string;
   }> {
-    const { data } = await this.client.post('/api/faces/index-library', { limit });
-    return data;
+    // Vercel hobby corta o proxy ~10s — lotes pequenos no Express
+    const batchSize = 3;
+    let processed = 0;
+    let facesTotal = 0;
+    let rounds = 0;
+    const maxRounds = Math.ceil(limit / batchSize);
+
+    while (rounds < maxRounds) {
+      const { data } = await this.client.post(
+        '/api/faces/index-library',
+        { limit: batchSize },
+        { timeout: 55000 }
+      );
+
+      if (data && typeof data === 'object' && 'error' in data && data.error) {
+        const errVal = (data as { error: unknown }).error;
+        throw new Error(
+          typeof errVal === 'string'
+            ? errVal
+            : errVal && typeof errVal === 'object' && 'message' in (errVal as object)
+              ? String((errVal as { message: unknown }).message)
+              : 'Falha ao indexar rostos'
+        );
+      }
+
+      const batchProcessed = Number(data?.processed) || 0;
+      const batchFaces = Number(data?.facesTotal) || 0;
+      processed += batchProcessed;
+      facesTotal += batchFaces;
+      rounds += 1;
+
+      // Nada pendente neste lote → acervo já indexado o suficiente
+      if (batchProcessed === 0) break;
+    }
+
+    return {
+      processed,
+      facesTotal,
+      message:
+        processed === 0
+          ? 'Nenhuma foto pendente de indexação neste lote.'
+          : `${processed} foto(s) indexada(s), ${facesTotal} rosto(s). Continue clicando se ainda houver fotos novas.`,
+    };
   }
 
   // Leaders CRUD (Next.js / Supabase — funciona no Vercel)
