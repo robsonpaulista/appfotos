@@ -74,7 +74,7 @@ export default function AcervoPage() {
         };
         message?: string;
       };
-      const status = ax.response?.status;
+      const status: number | undefined = ax.response?.status;
       const detail = toMessage(
         ax.response?.data?.error ?? ax.response?.data?.message ?? ax.message,
         'Falha ao indexar rostos.'
