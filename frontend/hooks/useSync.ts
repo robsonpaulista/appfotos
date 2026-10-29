@@ -1,11 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '@/utils/api';
 import type { SyncEvent } from '@/types/photo';
 
 export function useSync() {
   const [syncStatus, setSyncStatus] = useState<SyncEvent | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [indexing, setIndexing] = useState<boolean>(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const onCompleteRef = useRef<(() => void) | undefined>();
 
   const checkStatus = useCallback(async () => {
     try {
@@ -18,8 +21,7 @@ export function useSync() {
 
   useEffect(() => {
     checkStatus();
-    
-    // Poll status a cada 3 segundos se houver sincronização em andamento
+
     const interval = setInterval(() => {
       if (syncStatus?.status === 'started' || syncStatus?.status === 'in_progress') {
         checkStatus();
@@ -28,6 +30,30 @@ export function useSync() {
 
     return () => clearInterval(interval);
   }, [checkStatus, syncStatus?.status]);
+
+  const runFaceIndexing = useCallback(async () => {
+    setIndexing(true);
+    setStatusMessage('Indexando rostos das fotos sincronizadas…');
+    try {
+      const result = await api.indexPendingFaces(({ totalProcessed, totalFaces, round }) => {
+        setStatusMessage(
+          `Indexando rostos… lote ${round} (${totalProcessed} fotos, ${totalFaces} rostos)`
+        );
+      });
+      setStatusMessage(result.message);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Sync concluída, mas a indexação de rostos falhou. Tente de novo mais tarde.';
+      console.error('Erro na indexação pós-sync:', err);
+      setStatusMessage(message);
+      setError(message);
+    } finally {
+      setIndexing(false);
+      onCompleteRef.current?.();
+    }
+  }, []);
 
   const processChunks = useCallback(
     async (
@@ -58,6 +84,8 @@ export function useSync() {
           }, 500);
         } else if (result.done) {
           await checkStatus();
+          setStatusMessage('Sync concluída. Iniciando indexação de rostos…');
+          await runFaceIndexing();
         }
       } catch (err) {
         console.error('Erro ao processar chunk:', err);
@@ -65,18 +93,21 @@ export function useSync() {
         await checkStatus();
       }
     },
-    [checkStatus]
+    [checkStatus, runFaceIndexing]
   );
 
   const startSync = async (
     analyzeWithVision: boolean = false,
     folderId?: string,
     tags?: { person?: string; location?: string; event?: string },
-    folderName?: string
+    folderName?: string,
+    onComplete?: () => void
   ) => {
     try {
       setLoading(true);
       setError(null);
+      setStatusMessage('Iniciando sincronização…');
+      onCompleteRef.current = onComplete;
 
       setSyncStatus({
         status: 'started',
@@ -101,6 +132,7 @@ export function useSync() {
     } catch (err) {
       console.error('Erro ao iniciar sincronização:', err);
       setError('Falha ao iniciar sincronização');
+      setStatusMessage(null);
     } finally {
       setLoading(false);
     }
@@ -125,6 +157,7 @@ export function useSync() {
       setError(null);
       await api.cancelSync();
       await checkStatus();
+      setStatusMessage('Sincronização cancelada.');
     } catch (err) {
       console.error('Erro ao cancelar sincronização:', err);
       setError('Falha ao cancelar sincronização');
@@ -133,11 +166,16 @@ export function useSync() {
     }
   };
 
-  const isInProgress = syncStatus?.status === 'started' || syncStatus?.status === 'in_progress';
+  const isInProgress =
+    syncStatus?.status === 'started' ||
+    syncStatus?.status === 'in_progress' ||
+    indexing;
 
   return {
     syncStatus,
     loading,
+    indexing,
+    statusMessage,
     error,
     isInProgress,
     startSync,
@@ -146,4 +184,3 @@ export function useSync() {
     refresh: checkStatus,
   };
 }
-

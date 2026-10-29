@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { Header } from '@/components/Header';
@@ -14,7 +14,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { usePhotos } from '@/hooks/usePhotos';
 import { usePhotoSelection } from '@/hooks/usePhotoSelection';
 import { LoginLanding } from '@/components/LoginLanding';
-import { api } from '@/utils/api';
 import type { Photo } from '@/types/photo';
 
 export default function AcervoPage() {
@@ -33,61 +32,8 @@ export default function AcervoPage() {
     exitSelectionMode,
   } = usePhotoSelection();
 
-  const [indexing, setIndexing] = useState<boolean>(false);
-  const [indexMessage, setIndexMessage] = useState<string | null>(null);
-
   const handlePhotoClick = (photo: Photo) => {
     router.push(`/photo/${photo.id}`);
-  };
-
-  const toMessage = (value: unknown, fallback: string): string => {
-    if (typeof value === 'string' && value.trim()) return value;
-    if (value && typeof value === 'object') {
-      const obj = value as Record<string, unknown>;
-      if (typeof obj.message === 'string') return obj.message;
-      if (typeof obj.error === 'string') return obj.error;
-      try {
-        return JSON.stringify(value);
-      } catch {
-        return fallback;
-      }
-    }
-    return fallback;
-  };
-
-  const handleIndexFaces = async () => {
-    setIndexing(true);
-    setIndexMessage(null);
-    try {
-      // Local: lote maior no Express :4000. Produção: Render processa de 1 em 1.
-      const result = await api.indexLibraryFaces(30);
-      setIndexMessage(
-        toMessage(
-          result.message,
-          `${result.processed ?? 0} foto(s), ${result.facesTotal ?? 0} rosto(s).`
-        )
-      );
-    } catch (err: unknown) {
-      const ax = err as {
-        response?: {
-          status?: number;
-          data?: { error?: unknown; message?: unknown };
-        };
-        message?: string;
-      };
-      const status: number | undefined = ax.response?.status;
-      const detail = toMessage(
-        ax.response?.data?.error ?? ax.response?.data?.message ?? ax.message,
-        'Falha ao indexar rostos.'
-      );
-      setIndexMessage(
-        status === 502 || status === 503
-          ? `${detail} Abra /api/faces/backend-status (logado) para diagnosticar, ou o /health do Render.`
-          : detail
-      );
-    } finally {
-      setIndexing(false);
-    }
   };
 
   if (authLoading) {
@@ -142,14 +88,6 @@ export default function AcervoPage() {
                 <>
                   <SyncStatusBadge />
                   <SyncButton onSyncComplete={refresh} />
-                  <button
-                    type="button"
-                    onClick={handleIndexFaces}
-                    disabled={indexing}
-                    className="border border-ink/12 bg-white px-4 py-2.5 text-sm font-medium text-ink/70 transition-colors hover:border-ink/25 hover:text-ink disabled:opacity-50"
-                  >
-                    {indexing ? 'Indexando…' : 'Indexar rostos'}
-                  </button>
                 </>
               )}
               {photos.length > 0 &&
@@ -178,12 +116,6 @@ export default function AcervoPage() {
                 ))}
             </div>
           </div>
-
-          {indexMessage && (
-            <div className="border border-ink/10 bg-primary-500/15 px-4 py-3 text-sm text-ink/70">
-              {typeof indexMessage === 'string' ? indexMessage : String(indexMessage)}
-            </div>
-          )}
 
           <GeocodingButton onComplete={refresh} />
 

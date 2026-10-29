@@ -270,7 +270,9 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
         <div className="flex items-center justify-between p-6 border-b border-slate-200">
           <div>
             <h2 className="text-2xl font-bold text-slate-900">Selecionar Pasta</h2>
-            <p className="text-sm text-slate-600 mt-1">Escolha a pasta do Google Drive para sincronizar</p>
+            <p className="text-sm text-slate-600 mt-1">
+              Escolha a pasta do Google Drive — ao terminar a sync, os rostos são indexados automaticamente
+            </p>
           </div>
           <button
             onClick={onClose}

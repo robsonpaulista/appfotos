@@ -7,7 +7,14 @@ interface SyncButtonProps {
 }
 
 export function SyncButton({ onSyncComplete }: SyncButtonProps) {
-  const { syncStatus, isInProgress, startSync, cancelSync } = useSync();
+  const {
+    syncStatus,
+    isInProgress,
+    indexing,
+    statusMessage,
+    startSync,
+    cancelSync,
+  } = useSync();
   const [showFolderSelector, setShowFolderSelector] = useState(false);
 
   const handleSelectFolder = async (
@@ -15,10 +22,16 @@ export function SyncButton({ onSyncComplete }: SyncButtonProps) {
     folderName: string,
     tags?: { person?: string; location?: string; event?: string }
   ) => {
-    await startSync(false, folderId, tags, folderName);
+    await startSync(false, folderId, tags, folderName, onSyncComplete);
   };
 
   const handleCancel = async () => {
+    if (indexing) {
+      alert(
+        'A indexação de rostos está em andamento. Aguarde terminar ou recarregue a página para interromper.'
+      );
+      return;
+    }
     if (confirm('Deseja realmente cancelar a sincronização em andamento?')) {
       await cancelSync();
       onSyncComplete?.();
@@ -26,19 +39,20 @@ export function SyncButton({ onSyncComplete }: SyncButtonProps) {
   };
 
   const getStatusText = () => {
-    if (!syncStatus) return 'Sincronizar fotos';
+    if (indexing) return 'Indexando rostos…';
+    if (!syncStatus) return 'Sincronizar pasta';
 
     switch (syncStatus.status) {
       case 'started':
-        return 'Iniciando…';
+        return 'Iniciando sync…';
       case 'in_progress':
-        return `${syncStatus.photos_processed || 0} processadas`;
+        return `Sync ${syncStatus.photos_processed || 0} fotos…`;
       case 'completed':
-        return 'Sincronizar pasta';
+        return indexing ? 'Indexando rostos…' : 'Sincronizar pasta';
       case 'failed':
-        return 'Sincronizar fotos';
+        return 'Sincronizar pasta';
       default:
-        return 'Sincronizar fotos';
+        return 'Sincronizar pasta';
     }
   };
 
@@ -50,27 +64,38 @@ export function SyncButton({ onSyncComplete }: SyncButtonProps) {
 
   return (
     <>
-      <div className="flex gap-2">
-        <button
-          onClick={() => setShowFolderSelector(true)}
-          disabled={isInProgress}
-          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${buttonTone()}`}
-        >
-          {isInProgress && (
-            <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          )}
-          <span>{getStatusText()}</span>
-        </button>
-
-        {isInProgress && (
+      <div className="flex flex-col items-stretch gap-2 sm:items-end">
+        <div className="flex gap-2">
           <button
-            onClick={handleCancel}
-            className="border border-ink/12 bg-white px-4 py-2.5 text-sm font-medium text-ink/70 transition-colors hover:border-ink/25"
+            onClick={() => setShowFolderSelector(true)}
+            disabled={isInProgress}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${buttonTone()}`}
           >
-            Cancelar
+            {isInProgress && (
+              <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+            )}
+            <span>{getStatusText()}</span>
           </button>
+
+          {isInProgress && !indexing && (
+            <button
+              onClick={handleCancel}
+              className="border border-ink/12 bg-white px-4 py-2.5 text-sm font-medium text-ink/70 transition-colors hover:border-ink/25"
+            >
+              Cancelar
+            </button>
+          )}
+        </div>
+
+        {statusMessage && (
+          <p className="max-w-md text-right text-xs text-ink/55">{statusMessage}</p>
         )}
       </div>
 

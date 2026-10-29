@@ -308,6 +308,53 @@ class ApiClient {
     return data;
   }
 
+  /** Continua indexando até não restar foto pendente (used após sync). */
+  async indexPendingFaces(
+    onProgress?: (info: {
+      round: number;
+      processed: number;
+      facesTotal: number;
+      totalProcessed: number;
+      totalFaces: number;
+    }) => void
+  ): Promise<{ processed: number; facesTotal: number; message: string }> {
+    const isLocalBrowser =
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1' ||
+        /^\d{1,3}(\.\d{1,3}){3}$/.test(window.location.hostname));
+
+    let totalProcessed = 0;
+    let totalFaces = 0;
+    let round = 0;
+    const maxRounds = isLocalBrowser ? 40 : 80;
+
+    while (round < maxRounds) {
+      round += 1;
+      const batchLimit = isLocalBrowser ? 30 : 5;
+      const batch = await this.indexLibraryFaces(batchLimit);
+      totalProcessed += batch.processed;
+      totalFaces += batch.facesTotal;
+      onProgress?.({
+        round,
+        processed: batch.processed,
+        facesTotal: batch.facesTotal,
+        totalProcessed,
+        totalFaces,
+      });
+      if (batch.processed === 0) break;
+    }
+
+    return {
+      processed: totalProcessed,
+      facesTotal: totalFaces,
+      message:
+        totalProcessed === 0
+          ? 'Sync ok. Nenhuma foto nova para indexar rostos.'
+          : `Sync + indexação: ${totalProcessed} foto(s) analisada(s), ${totalFaces} rosto(s).`,
+    };
+  }
+
   /**
    * Indexa rostos:
    * - Local / LAN → Express em :4000 (lotes grandes, detecção completa — rápido na sua máquina)
