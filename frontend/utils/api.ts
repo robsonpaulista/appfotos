@@ -309,10 +309,11 @@ class ApiClient {
   }
 
   /**
-   * Indexa rostos chamando o Render direto (1 foto por vez).
-   * Evita o timeout do proxy Vercel (~10–60s); Face-API + cold start passa disso.
+   * Indexa rostos:
+   * - Local / LAN → Express em :4000 (lotes grandes, detecção completa — rápido na sua máquina)
+   * - Produção (Vercel) → Render direto (lotes de 1, modo fast)
    */
-  async indexLibraryFaces(limit: number = 15): Promise<{
+  async indexLibraryFaces(limit: number = 30): Promise<{
     processed: number;
     facesTotal: number;
     message?: string;
@@ -341,22 +342,70 @@ class ApiClient {
       return new Error(fallback);
     };
 
+    const isLocalBrowser =
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1' ||
+        /^\d{1,3}(\.\d{1,3}){3}$/.test(window.location.hostname));
+
     try {
-      const [{ data: status }, { data: tokenData }] = await Promise.all([
-        this.client.get('/api/faces/backend-status'),
-        this.client.get('/api/auth/access-token'),
-      ]);
-
-      if (!status?.ok || !status?.backend) {
-        throw new Error(
-          (typeof status?.message === 'string' && status.message) ||
-            'BACKEND_URL não configurada ou Render offline. Defina BACKEND_URL=https://appfotos.onrender.com no Vercel.'
-        );
-      }
-
+      const { data: tokenData } = await this.client.get('/api/auth/access-token');
       const accessToken = tokenData?.accessToken as string | undefined;
       if (!accessToken) {
         throw new Error('Sessão sem token. Faça login de novo.');
+      }
+
+      // ——— Desenvolvimento local: backend na porta 4000 ———
+      if (isLocalBrowser) {
+        const localUrl = getExpressBaseUrl() || 'http://localhost:4000';
+        try {
+          await axios.get(`${localUrl}/health`, { timeout: 3000 });
+        } catch {
+          throw new Error(
+            `Backend local não está no ar em ${localUrl}. Rode: cd backend && npm start`
+          );
+        }
+
+        const batchSize = Math.min(Math.max(limit, 1), 30);
+        const { data } = await axios.post(
+          `${localUrl}/api/faces/index-library`,
+          { limit: batchSize, fast: false },
+          {
+            timeout: 600000,
+            withCredentials: true,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }
+        );
+
+        if (data?.error) {
+          throw new Error(
+            typeof data.error === 'string' ? data.error : JSON.stringify(data.error)
+          );
+        }
+
+        const processed = Number(data?.processed) || 0;
+        const facesTotal = Number(data?.facesTotal) || 0;
+        return {
+          processed,
+          facesTotal,
+          message:
+            data?.message ||
+            (processed === 0
+              ? 'Nenhuma foto pendente de indexação neste lote.'
+              : `${processed} foto(s) analisada(s), ${facesTotal} rosto(s) (local).`),
+        };
+      }
+
+      // ——— Produção: Render (BACKEND_URL) ———
+      const { data: status } = await this.client.get('/api/faces/backend-status');
+      if (!status?.ok || !status?.backend) {
+        throw new Error(
+          (typeof status?.message === 'string' && status.message) ||
+            'BACKEND_URL não configurada ou Render offline.'
+        );
       }
 
       const backend = String(status.backend).replace(/\/$/, '');
@@ -367,9 +416,8 @@ class ApiClient {
       const postOne = async () =>
         axios.post(
           `${backend}/api/faces/index-library`,
-          { limit: 1 },
+          { limit: 1, fast: true },
           {
-            // Cloudflare/Render costuma cortar ~100s → 504; modo fast no backend deve caber
             timeout: 90000,
             headers: {
               'Content-Type': 'application/json',
@@ -383,6 +431,7 @@ class ApiClient {
           error?: unknown;
           processed?: number;
           facesTotal?: number;
+          message?: string;
         };
         try {
           ({ data } = await postOne());
@@ -392,10 +441,10 @@ class ApiClient {
             code?: string;
             response?: { status?: number };
           };
-          const status = ax.response?.status;
-          if (status === 504 || status === 502) {
+          const httpStatus = ax.response?.status;
+          if (httpStatus === 504 || httpStatus === 502) {
             throw new Error(
-              `Timeout ${status} no Render (foto pesada ou cold start). Clique de novo em Indexar — fotos já analisadas são puladas.`
+              `Timeout ${httpStatus} no Render. Clique de novo em Indexar — fotos já analisadas são puladas. Para velocidade, indexe localmente (localhost + backend :4000).`
             );
           }
           const isNetwork =
@@ -414,13 +463,10 @@ class ApiClient {
           } catch (retryErr: unknown) {
             throw asError(
               retryErr,
-              'Falha de rede com o Render. Abra https://appfotos.onrender.com/health e tente de novo.'
+              'Falha de rede com o Render. Prefira indexar em localhost com o backend na porta 4000.'
             );
           }
         }
-
-        // 504 = gateway cortou (foto lenta). Segue para a próxima no próximo clique.
-        // Já tratamos via asError abaixo se não for network.
 
         if (data?.error) {
           throw new Error(
@@ -442,7 +488,7 @@ class ApiClient {
         message:
           processed === 0
             ? 'Nenhuma foto pendente de indexação neste lote.'
-            : `${processed} foto(s) indexada(s), ${facesTotal} rosto(s). Clique de novo se ainda houver fotos novas.`,
+            : `${processed} foto(s) analisada(s), ${facesTotal} rosto(s). Em produção o Render é lento — use localhost para lotes grandes.`,
       };
     } catch (err: unknown) {
       throw asError(err, 'Falha ao indexar rostos');

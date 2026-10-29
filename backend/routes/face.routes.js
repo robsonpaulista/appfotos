@@ -121,8 +121,14 @@ router.post('/search-by-leader', requireAuth, async (req, res) => {
  */
 router.post('/index-library', requireAdmin, async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.body?.limit || '1', 10), 5);
+    // Local (máquina forte): lotes maiores + detecção completa.
+    // Render Free: fast=true, limit baixo (evita 504).
+    const fast = req.body?.fast !== false && req.body?.fast !== 'false';
+    const maxLimit = fast ? 5 : 50;
+    const defaultLimit = fast ? 1 : 20;
+    const limit = Math.min(parseInt(req.body?.limit || String(defaultLimit), 10), maxLimit);
     const libraryId = getLibrarySourceId();
+    console.log(`📇 index-library limit=${limit} fast=${fast}`);
 
     // Preferir fotos ainda não analisadas (evita loop nas mesmas sem rosto)
     let { data: photos, error } = await supabase
@@ -171,7 +177,7 @@ router.post('/index-library', requireAdmin, async (req, res) => {
         const detections = await faceRecognitionService.detectFaces(
           imageBuffer,
           photo.mime_type,
-          { fast: true }
+          { fast }
         );
         if (detections.length > 0) {
           await faceRecognitionService.saveFaceDescriptors(photo.id, detections);

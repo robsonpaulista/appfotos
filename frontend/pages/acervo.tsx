@@ -59,7 +59,8 @@ export default function AcervoPage() {
     setIndexing(true);
     setIndexMessage(null);
     try {
-      const result = await api.indexLibraryFaces(15);
+      // Local: lote maior no Express :4000. Produção: Render processa de 1 em 1.
+      const result = await api.indexLibraryFaces(30);
       setIndexMessage(
         toMessage(
           result.message,
