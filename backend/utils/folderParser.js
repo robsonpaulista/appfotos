@@ -101,6 +101,52 @@ export function normalizeCity(city) {
 }
 
 /**
+ * Pastas estruturais do Drive (não são cidade/local)
+ */
+export function isStructuralFolderName(name) {
+  if (!name) return true;
+  const n = String(name).trim().toLowerCase();
+  return n === 'arquivos' || n.startsWith('arquivos ');
+}
+
+/**
+ * Local da foto: tag manual > pasta-cidade pai > pasta sincronizada se for cidade
+ */
+export function resolvePhotoLocation({
+  manualLocation,
+  syncFolderId,
+  syncFolderName,
+  parentFolderId,
+  parentFolderName,
+}) {
+  const manual = manualLocation && String(manualLocation).trim();
+  if (manual) return manual;
+
+  const parentId = parentFolderId || null;
+  const parentName = parentFolderName ? String(parentFolderName).trim() : null;
+  const syncName = syncFolderName ? String(syncFolderName).trim() : null;
+
+  if (
+    parentName &&
+    parentId &&
+    parentId !== syncFolderId &&
+    !isStructuralFolderName(parentName)
+  ) {
+    return parentName;
+  }
+
+  if (syncName && !isStructuralFolderName(syncName)) {
+    return syncName;
+  }
+
+  if (parentName && !isStructuralFolderName(parentName)) {
+    return parentName;
+  }
+
+  return null;
+}
+
+/**
  * Lista todos os padrões válidos
  */
 export const VALID_PATTERNS = [

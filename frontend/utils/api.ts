@@ -207,8 +207,29 @@ class ApiClient {
     await this.client.post('/api/sync/cancel');
   }
 
-  async processChunk(syncId: string, pageToken?: string): Promise<any> {
-    const { data } = await this.client.post('/api/sync/process-chunk', { syncId, pageToken });
+  async processChunk(
+    syncId: string,
+    pageToken?: string,
+    options?: {
+      folderId?: string;
+      folderName?: string;
+      tags?: { person?: string; location?: string; event?: string };
+      folderMap?: Record<string, string>;
+    }
+  ): Promise<{
+    done: boolean;
+    nextPageToken?: string | null;
+    folderMap?: Record<string, string>;
+    folderId?: string;
+    folderName?: string;
+    tags?: { person?: string; location?: string; event?: string } | null;
+    stats?: { processed: number; added: number; updated: number; errors?: number };
+  }> {
+    const { data } = await this.client.post('/api/sync/process-chunk', {
+      syncId,
+      pageToken,
+      ...options,
+    });
     return data;
   }
 

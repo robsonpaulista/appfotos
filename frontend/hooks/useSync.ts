@@ -29,53 +29,73 @@ export function useSync() {
     return () => clearInterval(interval);
   }, [checkStatus, syncStatus?.status]);
 
-  const processChunks = useCallback(async (syncId: string, pageToken?: string) => {
-    try {
-      const result = await api.processChunk(syncId, pageToken);
-      
-      // Atualizar status com os dados mais recentes
-      await checkStatus();
-      
-      if (!result.done && result.nextPageToken) {
-        // Continuar processando próximo chunk após um pequeno delay
-        setTimeout(() => {
-          processChunks(syncId, result.nextPageToken);
-        }, 500);
-      } else if (result.done) {
-        // Sincronização concluída
+  const processChunks = useCallback(
+    async (
+      syncId: string,
+      pageToken?: string,
+      ctx?: {
+        folderId?: string;
+        folderName?: string;
+        tags?: { person?: string; location?: string; event?: string };
+        folderMap?: Record<string, string>;
+      }
+    ) => {
+      try {
+        const result = await api.processChunk(syncId, pageToken, ctx);
+
+        await checkStatus();
+
+        const nextCtx = {
+          folderId: result.folderId || ctx?.folderId,
+          folderName: result.folderName || ctx?.folderName,
+          tags: result.tags || ctx?.tags,
+          folderMap: result.folderMap || ctx?.folderMap,
+        };
+
+        if (!result.done && result.nextPageToken) {
+          setTimeout(() => {
+            processChunks(syncId, result.nextPageToken || undefined, nextCtx);
+          }, 500);
+        } else if (result.done) {
+          await checkStatus();
+        }
+      } catch (err) {
+        console.error('Erro ao processar chunk:', err);
+        setError('Erro ao processar sincronização');
         await checkStatus();
       }
-    } catch (err) {
-      console.error('Erro ao processar chunk:', err);
-      setError('Erro ao processar sincronização');
-      // Marcar como falha
-      await checkStatus();
-    }
-  }, [checkStatus]);
+    },
+    [checkStatus]
+  );
 
-  const startSync = async (analyzeWithVision: boolean = false, folderId?: string, tags?: { person?: string; location?: string; event?: string }) => {
+  const startSync = async (
+    analyzeWithVision: boolean = false,
+    folderId?: string,
+    tags?: { person?: string; location?: string; event?: string },
+    folderName?: string
+  ) => {
     try {
       setLoading(true);
       setError(null);
-      
-      // Resetar status para mostrar que está iniciando
+
       setSyncStatus({
         status: 'started',
         photos_processed: 0,
         photos_added: 0,
         photos_updated: 0,
-      } as any);
-      
+      } as SyncEvent);
+
       const response = await api.startSync(analyzeWithVision, folderId, tags);
-      
-      // Atualizar status
+
       await checkStatus();
-      
-      // Iniciar processamento de chunks com o syncId retornado
+
       if (response.syncId) {
-        // Aguardar um pouco antes de começar a processar
         setTimeout(() => {
-          processChunks(response.syncId);
+          processChunks(response.syncId, undefined, {
+            folderId,
+            folderName,
+            tags,
+          });
         }, 500);
       }
     } catch (err) {

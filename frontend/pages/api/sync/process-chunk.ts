@@ -2,12 +2,19 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { requireAdmin } from '../../../lib/api-server/auth';
 import { supabase } from '../../../lib/api-server/supabase.config';
 import { getDriveClient, getDriveFolderId, getLibrarySourceId } from '../../../lib/api-server/google.config';
+import {
+  isStructuralFolderName,
+  resolvePhotoLocation,
+} from '../../../lib/folder-location';
 
 const CHUNK_SIZE = 10;
+
+type SyncTags = { person?: string; location?: string; event?: string };
 
 /**
  * POST /api/sync/process-chunk
  * Processa um chunk de fotos (admin + service account)
+ * Body: syncId, pageToken?, folderId?, folderName?, tags?, folderMap?
  */
 export default async function handler(
   req: NextApiRequest,
@@ -23,10 +30,27 @@ export default async function handler(
       return res.status(403).json({ error: 'Acesso restrito a administradores' });
     }
 
-    const { syncId, pageToken } = req.body;
+    const {
+      syncId,
+      pageToken,
+      folderId: bodyFolderId,
+      folderName: bodyFolderName,
+      tags: bodyTags,
+      folderMap: cachedFolderMap,
+    } = req.body as {
+      syncId?: string;
+      pageToken?: string;
+      folderId?: string;
+      folderName?: string;
+      tags?: SyncTags | null;
+      folderMap?: Record<string, string>;
+    };
+
     const userId = auth.userId;
     const libraryId = getLibrarySourceId();
-    const rootFolderId = getDriveFolderId();
+    const syncRootId =
+      (typeof bodyFolderId === 'string' && bodyFolderId.trim()) || getDriveFolderId();
+    const tags = bodyTags || null;
 
     if (!syncId) {
       return res.status(400).json({ error: 'syncId é obrigatório' });
@@ -49,41 +73,77 @@ export default async function handler(
         stats: {
           processed: syncEvent.photos_processed,
           added: syncEvent.photos_added,
-          updated: syncEvent.photos_updated
-        }
+          updated: syncEvent.photos_updated,
+        },
       });
     }
 
     const drive = await getDriveClient();
 
-    async function collectSubfolders(folderId: string): Promise<string[]> {
-      const response = await drive.files.list({
-        q: `'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-        fields: 'files(id)',
-        pageSize: 100,
+    async function buildFolderMap(rootId: string): Promise<Record<string, string>> {
+      const map: Record<string, string> = {};
+      const rootInfo = await drive.files.get({
+        fileId: rootId,
+        fields: 'id, name',
         supportsAllDrives: true,
-        includeItemsFromAllDrives: true
       });
-      const ids = (response.data.files || []).map(f => f.id!).filter(Boolean);
-      let all = [...ids];
-      for (const id of ids) {
-        all = all.concat(await collectSubfolders(id));
+      if (rootInfo.data.id) {
+        map[rootInfo.data.id] = rootInfo.data.name || 'Pasta';
       }
-      return all;
+
+      const queue = [rootId];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        let page: string | undefined;
+        do {
+          const listed = await drive.files.list({
+            q: `'${current}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+            fields: 'nextPageToken, files(id, name)',
+            pageSize: 100,
+            pageToken: page,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+          });
+          for (const f of listed.data.files || []) {
+            if (!f.id || map[f.id]) continue;
+            map[f.id] = f.name || 'Sem nome';
+            queue.push(f.id);
+          }
+          page = listed.data.nextPageToken || undefined;
+        } while (page);
+      }
+      return map;
     }
 
-    const subIds = await collectSubfolders(rootFolderId);
-    const folderIds = [rootFolderId, ...subIds];
-    const folderQuery = folderIds.map(id => `'${id}' in parents`).join(' or ');
+    let folderMap: Record<string, string>;
+    let syncFolderName = bodyFolderName?.trim() || '';
+    try {
+      folderMap =
+        cachedFolderMap && Object.keys(cachedFolderMap).length > 0
+          ? cachedFolderMap
+          : await buildFolderMap(syncRootId);
+      if (!syncFolderName) {
+        syncFolderName = folderMap[syncRootId] || '';
+      }
+    } catch (mapError) {
+      console.error('Erro ao mapear pastas:', mapError);
+      return res.status(500).json({
+        error: 'Falha ao mapear pastas do Drive para classificar locais',
+      });
+    }
+
+    const folderIds = Object.keys(folderMap);
+    const folderQuery = folderIds.map((id) => `'${id}' in parents`).join(' or ');
     const query = `mimeType contains 'image/' and trashed=false and (${folderQuery})`;
 
     const response = await drive.files.list({
       q: query,
       pageSize: CHUNK_SIZE,
       pageToken: pageToken || undefined,
-      fields: 'nextPageToken, files(id, name, mimeType, createdTime, modifiedTime, size, thumbnailLink, webViewLink)',
+      fields:
+        'nextPageToken, files(id, name, mimeType, createdTime, modifiedTime, size, thumbnailLink, webViewLink, parents)',
       supportsAllDrives: true,
-      includeItemsFromAllDrives: true
+      includeItemsFromAllDrives: true,
     });
 
     const files = response.data.files || [];
@@ -94,17 +154,21 @@ export default async function handler(
         .from('sync_events')
         .update({
           status: 'completed',
-          completed_at: new Date().toISOString()
+          completed_at: new Date().toISOString(),
         })
         .eq('id', syncId);
 
       return res.json({
         done: true,
+        folderMap,
+        folderId: syncRootId,
+        folderName: syncFolderName,
+        tags,
         stats: {
           processed: syncEvent.photos_processed,
           added: syncEvent.photos_added,
-          updated: syncEvent.photos_updated
-        }
+          updated: syncEvent.photos_updated,
+        },
       });
     }
 
@@ -114,6 +178,16 @@ export default async function handler(
 
     for (const file of files) {
       try {
+        const parentId = file.parents?.[0] || null;
+        const parentName = parentId ? folderMap[parentId] || null : null;
+        const location = resolvePhotoLocation({
+          manualLocation: tags?.location,
+          syncFolderId: syncRootId,
+          syncFolderName,
+          parentFolderId: parentId,
+          parentFolderName: parentName,
+        });
+
         const { data: existing } = await supabase
           .from('photos')
           .select('id')
@@ -121,18 +195,28 @@ export default async function handler(
           .eq('user_id', libraryId)
           .single();
 
-        const photoData = {
+        const photoData: Record<string, unknown> = {
           drive_id: file.id,
           user_id: libraryId,
-          drive_folder_id: rootFolderId,
+          drive_folder_id: parentId || syncRootId,
           name: file.name || 'Sem nome',
           created_at: file.createdTime || new Date().toISOString(),
           modified_at: file.modifiedTime || new Date().toISOString(),
           size_bytes: file.size ? parseInt(file.size, 10) : null,
           thumbnail_url: file.thumbnailLink || null,
           storage_url: file.webViewLink || null,
-          mime_type: file.mimeType || 'image/jpeg'
+          mime_type: file.mimeType || 'image/jpeg',
         };
+
+        if (location) {
+          photoData.location_name = location;
+          // event_city só se não for pasta estrutural (cidade real)
+          if (!isStructuralFolderName(location)) {
+            photoData.event_city = location;
+          }
+        }
+        if (tags?.person) photoData.person_tag = tags.person;
+        if (tags?.event) photoData.event_type = tags.event;
 
         if (existing) {
           await supabase.from('photos').update(photoData).eq('id', existing.id);
@@ -158,19 +242,23 @@ export default async function handler(
         photos_processed: newProcessed,
         photos_added: newAdded,
         photos_updated: newUpdated,
-        completed_at: nextPageToken ? null : new Date().toISOString()
+        completed_at: nextPageToken ? null : new Date().toISOString(),
       })
       .eq('id', syncId);
 
     return res.json({
       done: !nextPageToken,
       nextPageToken,
+      folderMap,
+      folderId: syncRootId,
+      folderName: syncFolderName,
+      tags,
       stats: {
         processed: newProcessed,
         added: newAdded,
         updated: newUpdated,
-        errors
-      }
+        errors,
+      },
     });
   } catch (error: unknown) {
     console.error('Erro no process-chunk:', error);

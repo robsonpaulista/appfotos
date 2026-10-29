@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '@/utils/api';
+import { isStructuralFolderName } from '@/lib/folder-location';
 
 interface Folder {
   id: string;
@@ -49,6 +50,16 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
       loadFolders();
     }
   }, [isOpen]);
+
+  // Prefill local com o nome da pasta-cidade; pastas "Arquivos…" ficam vazias (local vem das filhas)
+  useEffect(() => {
+    if (!selectedFolder) return;
+    if (isStructuralFolderName(selectedFolder.name)) {
+      setLocationTag('');
+    } else {
+      setLocationTag(selectedFolder.name);
+    }
+  }, [selectedFolder]);
 
   const parseFoldersError = (error: unknown): string => {
     const ax = error as {
@@ -313,8 +324,12 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <div className="text-sm text-blue-800">
-                    <p className="font-semibold mb-1">Organizar automaticamente (opcional)</p>
-                    <p className="text-blue-700">Preencha os campos abaixo para adicionar tags em todas as fotos desta pasta.</p>
+                    <p className="font-semibold mb-1">Local pela pasta da cidade</p>
+                    <p className="text-blue-700">
+                      {isStructuralFolderName(selectedFolder.name)
+                        ? 'Ao sincronizar esta pasta-mãe, cada foto recebe o local do nome da subpasta (ex.: Wall Ferraz).'
+                        : `O local será “${selectedFolder.name}”. Você pode ajustar abaixo se quiser.`}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -344,13 +359,17 @@ export function FolderSelector({ isOpen, onClose, onSelectFolder }: FolderSelect
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
-                    Local (opcional)
+                    Local {isStructuralFolderName(selectedFolder.name) ? '(automático pelas cidades)' : '(nome da pasta)'}
                   </label>
                   <input
                     type="text"
                     value={locationTag}
                     onChange={(e) => setLocationTag(e.target.value)}
-                    placeholder="Ex: São Paulo, Paris, Praia..."
+                    placeholder={
+                      isStructuralFolderName(selectedFolder.name)
+                        ? 'Deixe vazio para usar o nome de cada cidade filha'
+                        : selectedFolder.name
+                    }
                     className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
                   />
                 </div>

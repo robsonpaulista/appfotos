@@ -4,7 +4,11 @@ import folderService from './folder.service.js';
 import geocodingService from './geocoding.service.js';
 import { supabase } from '../config/supabase.config.js';
 import { getLibrarySourceId, getDriveFolderId } from '../config/google.config.js';
-import { extractTagsFromFolderName } from '../utils/folderParser.js';
+import {
+  extractTagsFromFolderName,
+  isStructuralFolderName,
+  resolvePhotoLocation,
+} from '../utils/folderParser.js';
 
 /**
  * Serviço para ingestão e sincronização de fotos do Google Drive
@@ -38,12 +42,23 @@ class IngestService {
       let pageToken = null;
       let hasMore = true;
 
-      // Obter nome da pasta para extrair tags
+      // Obter nome da pasta + mapa id→nome (para local = pasta da cidade)
       let folderName = null;
+      let folderMap = new Map();
       try {
         const folderInfo = await folderService.getFolderInfo(effectiveFolderId);
         folderName = folderInfo.name;
-        console.log(`📁 Sincronizando pasta: ${folderName}`);
+        folderMap.set(effectiveFolderId, folderName);
+        const subIds = await folderService.getAllSubfolderIds(effectiveFolderId);
+        for (const id of subIds) {
+          try {
+            const info = await folderService.getFolderInfo(id);
+            folderMap.set(id, info.name);
+          } catch {
+            // ignore
+          }
+        }
+        console.log(`📁 Sincronizando pasta: ${folderName} (${folderMap.size} pastas no mapa)`);
 
         if (manualTags) {
           console.log(`🏷️  Tags manuais que serão aplicadas:`);
@@ -69,7 +84,15 @@ class IngestService {
           }
 
           // Fotos ficam sob libraryId (DRIVE_FOLDER_ID), não sob o admin
-          const batchStats = await this.processBatch(files, libraryId, analyzeWithVision, folderName, manualTags);
+          const batchStats = await this.processBatch(
+            files,
+            libraryId,
+            analyzeWithVision,
+            folderName,
+            manualTags,
+            effectiveFolderId,
+            folderMap
+          );
           stats.processed += batchStats.processed;
           stats.added += batchStats.added;
           stats.updated += batchStats.updated;
@@ -112,18 +135,59 @@ class IngestService {
    * @param {Object} manualTags - Tags manuais para aplicar
    * @returns {Promise<Object>} Estatísticas do batch
    */
-  async processBatch(files, userId, analyzeWithVision, folderName = null, manualTags = null) {
+  async processBatch(
+    files,
+    userId,
+    analyzeWithVision,
+    folderName = null,
+    manualTags = null,
+    syncFolderId = null,
+    folderMap = null
+  ) {
     const stats = { processed: 0, added: 0, updated: 0, errors: 0 };
 
     for (const file of files) {
       try {
-        const photoData = await this.preparePhotoData(file, userId, analyzeWithVision, folderName);
-        
-        // Aplicar tags manuais se fornecidas (sobrescrevem tags automáticas)
+        const parentId = file.parents?.[0] || null;
+        const parentName = parentId && folderMap ? folderMap.get(parentId) : null;
+        const locationFolderName =
+          resolvePhotoLocation({
+            manualLocation: manualTags?.location,
+            syncFolderId: syncFolderId || '',
+            syncFolderName: folderName,
+            parentFolderId: parentId,
+            parentFolderName: parentName,
+          }) || folderName;
+
+        const photoData = await this.preparePhotoData(
+          file,
+          userId,
+          analyzeWithVision,
+          locationFolderName
+        );
+
+        // Local explícito pela pasta-cidade (ou tag manual)
+        const location = resolvePhotoLocation({
+          manualLocation: manualTags?.location,
+          syncFolderId: syncFolderId || '',
+          syncFolderName: folderName,
+          parentFolderId: parentId,
+          parentFolderName: parentName,
+        });
+        if (location) {
+          photoData.location_name = location;
+          if (!isStructuralFolderName(location)) {
+            photoData.event_city = location;
+          }
+        }
+
         if (manualTags) {
           if (manualTags.person) photoData.person_tag = manualTags.person;
-          if (manualTags.location) photoData.location_name = manualTags.location;
           if (manualTags.event) photoData.event_type = manualTags.event;
+        }
+
+        if (parentId) {
+          photoData.drive_folder_id = parentId;
         }
         
         const result = await this.upsertPhoto(photoData);

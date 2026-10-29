@@ -12,10 +12,10 @@ export function SyncButton({ onSyncComplete }: SyncButtonProps) {
 
   const handleSelectFolder = async (
     folderId: string,
-    _folderName: string,
+    folderName: string,
     tags?: { person?: string; location?: string; event?: string }
   ) => {
-    await startSync(false, folderId, tags);
+    await startSync(false, folderId, tags, folderName);
   };
 
   const handleCancel = async () => {
