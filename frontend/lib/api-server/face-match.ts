@@ -11,9 +11,12 @@ export function euclideanDistance(a: number[], b: number[]): number {
   return Math.sqrt(sum);
 }
 
+/** Distância euclidiana Face-API: menor = mais parecido. ~0.4 restrito, ~0.55–0.6 amplo. */
+export const DEFAULT_LEADER_MATCH_THRESHOLD = 0.58;
+
 export async function searchArchiveByDescriptor(
   targetDescriptor: number[],
-  threshold = 0.5
+  threshold = DEFAULT_LEADER_MATCH_THRESHOLD
 ) {
   const { data: allDescriptors, error } = await supabase
     .from('face_descriptors')

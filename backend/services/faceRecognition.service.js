@@ -103,7 +103,8 @@ class FaceRecognitionService {
         img,
         new faceapi.TinyFaceDetectorOptions({
           inputSize: fast ? 416 : 512,
-          scoreThreshold: fast ? 0.4 : 0.35,
+          // Limiar mais baixo = detecta mais rostos (incl. perfil / longe)
+          scoreThreshold: fast ? 0.35 : 0.3,
         })
       ).withFaceLandmarks().withFaceDescriptors();
 

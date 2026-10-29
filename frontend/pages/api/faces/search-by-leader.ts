@@ -1,7 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { requireAuth } from '../../../lib/api-server/auth';
 import { supabase } from '../../../lib/api-server/supabase.config';
-import { searchArchiveByDescriptor } from '../../../lib/api-server/face-match';
+import {
+  DEFAULT_LEADER_MATCH_THRESHOLD,
+  searchArchiveByDescriptor,
+} from '../../../lib/api-server/face-match';
 
 /**
  * POST /api/faces/search-by-leader
@@ -18,7 +21,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
-    const { leaderId, threshold = 0.5 } = req.body || {};
+    const rawThreshold = req.body?.threshold;
+    const threshold =
+      rawThreshold != null && Number.isFinite(Number(rawThreshold))
+        ? Number(rawThreshold)
+        : DEFAULT_LEADER_MATCH_THRESHOLD;
+    const { leaderId } = req.body || {};
     if (!leaderId) {
       return res.status(400).json({ error: 'leaderId é obrigatório' });
     }
@@ -44,12 +52,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const result = await searchArchiveByDescriptor(
       leader.face_vector as number[],
-      Number(threshold) || 0.5
+      threshold
     );
 
+    const matchCount = result.matches?.length || 0;
     return res.json({
       matches: result.matches,
       indexedFaces: result.indexedFaces,
+      threshold,
+      message:
+        matchCount === 0
+          ? 'Nenhuma foto com rosto parecido o bastante. Confira se as fotos foram indexadas (sync).'
+          : matchCount < 5 && (result.indexedFaces || 0) > matchCount
+            ? `${matchCount} foto(s) encontradas (limiar ${threshold}). Se faltarem imagens onde ele aparece, rode a sync de novo para reindexar rostos.`
+            : undefined,
       leader: {
         id: leader.id,
         name: leader.name,

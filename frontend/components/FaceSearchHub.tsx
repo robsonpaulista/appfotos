@@ -226,9 +226,16 @@ export function FaceSearchHub({ isAdmin = false }: FaceSearchHubProps) {
     setMessage(null);
     setMatches([]);
     try {
-      const result = await api.searchByLeader(id);
+      // 0.58: equilibra recall (mais fotos do líder) sem o ruído do 0.7
+      const result = await api.searchByLeader(id, 0.58);
       setMatches(result.matches || []);
-      if (result.message) setMessage(result.message);
+      if (result.message) {
+        setMessage(result.message);
+      } else if ((result.matches || []).length > 0) {
+        setMessage(
+          `${result.matches!.length} foto(s) com rosto parecido com a liderança.`
+        );
+      }
     } catch (err: unknown) {
       const ax = err as { response?: { data?: { error?: string; message?: string } } };
       setError(
