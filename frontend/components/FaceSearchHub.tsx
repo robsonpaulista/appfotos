@@ -83,7 +83,7 @@ export function FaceSearchHub({ isAdmin = false }: FaceSearchHubProps) {
         if (!cancelled) setLeaders(list);
       } catch {
         if (!cancelled) {
-          setError('Não foi possível carregar lideranças. Verifique se o backend está no ar.');
+          setError('Não foi possível carregar lideranças. Faça login de novo ou tente mais tarde.');
         }
       } finally {
         if (!cancelled) setLeadersLoading(false);

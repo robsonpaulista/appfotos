@@ -58,7 +58,7 @@ export default function LiderancasPage() {
       const list = await api.getLeaders(query ? { q: query } : undefined);
       setLeaders(list);
     } catch {
-      setError('Não foi possível listar lideranças. Backend na porta 4000?');
+      setError('Não foi possível listar lideranças. Verifique a sessão e tente de novo.');
     } finally {
       setLoading(false);
     }

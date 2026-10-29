@@ -35,7 +35,10 @@ const nextConfig = {
     unoptimized: process.env.NODE_ENV === 'development',
   },
   env: {
-    NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000',
+    // Em produção no Vercel, não force localhost (quebra Face-API no browser do usuário)
+    NEXT_PUBLIC_BACKEND_URL:
+      process.env.NEXT_PUBLIC_BACKEND_URL ||
+      (process.env.VERCEL ? '' : 'http://localhost:4000'),
   }
 }
 

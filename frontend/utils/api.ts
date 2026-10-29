@@ -23,12 +23,17 @@ function getBaseUrl(): string {
 }
 
 /**
- * Express (Face-API / lideranças).
+ * Express (Face-API / indexação).
  * - localhost → NEXT_PUBLIC_BACKEND_URL ou :4000
  * - IP na LAN → mesmo host :4000
- * - Vercel/domínio → NEXT_PUBLIC_BACKEND_URL (backend hospedado); senão vazio
+ * - Vercel/domínio → só se NEXT_PUBLIC_BACKEND_URL for URL pública (ignora localhost do build)
  */
 function getExpressBaseUrl(): string {
+  const configured = (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim();
+  const isConfiguredLocal =
+    !configured ||
+    /localhost|127\.0\.0\.1/i.test(configured);
+
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
     const isLocalhost = host === 'localhost' || host === '127.0.0.1';
@@ -38,10 +43,22 @@ function getExpressBaseUrl(): string {
       return `${window.location.protocol}//${host}:4000`;
     }
     if (!isLocalhost) {
-      return process.env.NEXT_PUBLIC_BACKEND_URL || '';
+      return isConfiguredLocal ? '' : configured;
     }
   }
-  return process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
+  return configured || 'http://localhost:4000';
+}
+
+function fileToDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error('Falha ao ler a foto'));
+    };
+    reader.onerror = () => reject(new Error('Falha ao ler a foto'));
+    reader.readAsDataURL(file);
+  });
 }
 
 const BASE_URL = getBaseUrl();
@@ -259,8 +276,16 @@ class ApiClient {
     return data;
   }
 
-  // Face search (Express)
+  // Face search — busca por liderança no Next; imagem/indexação no Express
   async searchByImage(file: Blob, threshold?: number): Promise<FaceSearchResult> {
+    if (!this.express.defaults.baseURL) {
+      return {
+        error: 'backend_offline',
+        message:
+          'Busca por selfie/upload precisa do backend Face-API. Defina NEXT_PUBLIC_BACKEND_URL no Vercel (URL pública do Express).',
+        matches: [],
+      };
+    }
     const form = new FormData();
     form.append('image', file, file instanceof File ? file.name : 'capture.jpg');
     if (threshold != null) form.append('threshold', String(threshold));
@@ -269,11 +294,10 @@ class ApiClient {
   }
 
   async searchByLeader(leaderId: string, threshold?: number): Promise<FaceSearchResult> {
-    const { data } = await this.express.post(
-      '/api/faces/search-by-leader',
-      { leaderId, threshold },
-      { headers: { 'Content-Type': 'application/json' } }
-    );
+    const { data } = await this.client.post('/api/faces/search-by-leader', {
+      leaderId,
+      threshold,
+    });
     return data;
   }
 
@@ -282,6 +306,11 @@ class ApiClient {
     facesTotal: number;
     message?: string;
   }> {
+    if (!this.express.defaults.baseURL) {
+      throw new Error(
+        'Indexação facial precisa do backend Express. Defina NEXT_PUBLIC_BACKEND_URL no Vercel.'
+      );
+    }
     const { data } = await this.express.post(
       '/api/faces/index-library',
       { limit },
@@ -290,9 +319,9 @@ class ApiClient {
     return data;
   }
 
-  // Leaders CRUD (Express)
+  // Leaders CRUD (Next.js / Supabase — funciona no Vercel)
   async getLeaders(params?: { q?: string; city?: string }): Promise<Leader[]> {
-    const { data } = await this.express.get('/api/leaders', { params });
+    const { data } = await this.client.get('/api/leaders', { params });
     return data.leaders || [];
   }
 
@@ -302,17 +331,18 @@ class ApiClient {
     role_title?: string;
     photo: File;
   }): Promise<Leader> {
-    const form = new FormData();
-    form.append('name', payload.name);
-    if (payload.city) form.append('city', payload.city);
-    if (payload.role_title) form.append('role_title', payload.role_title);
-    form.append('photo', payload.photo);
-    const { data } = await this.express.post('/api/leaders', form);
+    const photo_data = await fileToDataUrl(payload.photo);
+    const { data } = await this.client.post('/api/leaders', {
+      name: payload.name,
+      city: payload.city,
+      role_title: payload.role_title,
+      photo_data,
+    });
     return data.leader;
   }
 
   async deleteLeader(id: string): Promise<void> {
-    await this.express.delete(`/api/leaders/${id}`);
+    await this.client.delete(`/api/leaders/${id}`);
   }
 }
 
