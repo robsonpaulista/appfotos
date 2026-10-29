@@ -47,8 +47,15 @@ export default function AcervoPage() {
       const result = await api.indexLibraryFaces(30);
       setIndexMessage(result.message || `${result.processed} foto(s), ${result.facesTotal} rosto(s).`);
     } catch (err: unknown) {
-      const ax = err as { response?: { data?: { error?: string } } };
-      setIndexMessage(ax.response?.data?.error || 'Falha ao indexar rostos. Backend na porta 4000?');
+      const ax = err as {
+        response?: { data?: { error?: string } };
+        message?: string;
+      };
+      setIndexMessage(
+        ax.response?.data?.error ||
+          ax.message ||
+          'Falha ao indexar rostos. Em produção, configure BACKEND_URL no Vercel (Express com Face-API).'
+      );
     } finally {
       setIndexing(false);
     }

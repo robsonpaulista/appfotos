@@ -276,21 +276,28 @@ class ApiClient {
     return data;
   }
 
-  // Face search — busca por liderança no Next; imagem/indexação no Express
+  // Face: liderança no Next; selfie/indexação via proxy Next → Express (BACKEND_URL)
   async searchByImage(file: Blob, threshold?: number): Promise<FaceSearchResult> {
-    if (!this.express.defaults.baseURL) {
-      return {
-        error: 'backend_offline',
-        message:
-          'Busca por selfie/upload precisa do backend Face-API. Defina NEXT_PUBLIC_BACKEND_URL no Vercel (URL pública do Express).',
-        matches: [],
-      };
-    }
     const form = new FormData();
     form.append('image', file, file instanceof File ? file.name : 'capture.jpg');
     if (threshold != null) form.append('threshold', String(threshold));
-    const { data } = await this.express.post('/api/faces/search-by-image', form);
-    return data;
+    try {
+      const { data } = await this.client.post('/api/faces/search-by-image', form);
+      return data;
+    } catch (error: unknown) {
+      const ax = error as { response?: { data?: FaceSearchResult & { error?: string } } };
+      if (ax.response?.data) {
+        return {
+          error: ax.response.data.error || 'backend_offline',
+          message:
+            ax.response.data.message ||
+            ax.response.data.error ||
+            'Backend Face-API indisponível',
+          matches: ax.response.data.matches || [],
+        };
+      }
+      throw error;
+    }
   }
 
   async searchByLeader(leaderId: string, threshold?: number): Promise<FaceSearchResult> {
@@ -306,16 +313,7 @@ class ApiClient {
     facesTotal: number;
     message?: string;
   }> {
-    if (!this.express.defaults.baseURL) {
-      throw new Error(
-        'Indexação facial precisa do backend Express. Defina NEXT_PUBLIC_BACKEND_URL no Vercel.'
-      );
-    }
-    const { data } = await this.express.post(
-      '/api/faces/index-library',
-      { limit },
-      { headers: { 'Content-Type': 'application/json' } }
-    );
+    const { data } = await this.client.post('/api/faces/index-library', { limit });
     return data;
   }
 
